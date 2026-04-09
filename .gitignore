@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# OS/IDE
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Flutter/Dart
+**/.dart_tool/
+**/build/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/ios/Pods/
+**/android/.gradle/
+
+# Logs
+*.log
