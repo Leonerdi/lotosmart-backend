@@ -18,15 +18,14 @@ import 'package:webview_cef/webview_cef.dart' as cef;
 import 'package:printing/printing.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show HttpDate, Platform;
 
-// ---------------------------------------------------------------
-// Configuração de conectividade para teste no celular físico.
-// Altere _kUseRealDevice = true ao testar via USB fora do emulador.
-// ---------------------------------------------------------------
-const String _kCloudApiBaseUrl = 'https://lotosmart-api.up.railway.app';
-const bool _kUseRealDevice = true;
-const String _kPcIpWifi = '192.168.0.106';
+// Base única de produção (HTTPS). Para trocar sem editar código,
+// use: --dart-define=API_BASE_URL=https://seu-dominio.app
+const String kProductionApiBaseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'https://lotosmart-api.up.railway.app',
+);
 
 const kLotofacilPurple = Color(0xFF7B1FA2);
 const kLotofacilPurpleGlow = Color(0xFFA855F7);
@@ -272,12 +271,14 @@ class ResultadosPage extends StatelessWidget {
   final List<JogoIA> jogos;
   final Diagnostico? diagnostico;
   final String estrategia;
+  final DateTime? dataHoraBase;
 
   const ResultadosPage({
     super.key,
     required this.jogos,
     required this.diagnostico,
     required this.estrategia,
+    this.dataHoraBase,
   });
 
   void _compartilharTodos() {
@@ -304,7 +305,7 @@ class ResultadosPage extends StatelessWidget {
   String _doisDigitos(int n) => n.toString().padLeft(2, '0');
 
   String _dataHoraEmissao() {
-    final agora = DateTime.now();
+    final agora = dataHoraBase ?? DateTime.now();
     return '${_doisDigitos(agora.day)}/${_doisDigitos(agora.month)}/${agora.year} '
         '${_doisDigitos(agora.hour)}:${_doisDigitos(agora.minute)}';
   }
@@ -1794,6 +1795,7 @@ class ProcessingConsole extends StatefulWidget {
   final Diagnostico? diagnostico;
   final String estrategia;
   final int concursosAnalisados;
+  final DateTime? dataHoraBase;
 
   const ProcessingConsole({
     super.key,
@@ -1801,6 +1803,7 @@ class ProcessingConsole extends StatefulWidget {
     required this.diagnostico,
     required this.estrategia,
     required this.concursosAnalisados,
+    this.dataHoraBase,
   });
 
   @override
@@ -1851,6 +1854,7 @@ class _ProcessingConsoleState extends State<ProcessingConsole> {
           jogos: widget.jogos,
           diagnostico: widget.diagnostico,
           estrategia: widget.estrategia,
+          dataHoraBase: widget.dataHoraBase,
         ),
       ),
     );
@@ -1976,48 +1980,39 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   int _loadingTextIndex = 0;
   late AnimationController _loadingAnimController;
   late AnimationController _tickerController;
+  DateTime? _serverTimeAtSync;
+  DateTime? _deviceTimeAtSync;
 
-  String? _effectiveBaseUrl;
-
-  List<String> get _baseUrlCandidates {
-    if (Platform.isWindows) {
-      return const [_kCloudApiBaseUrl, 'http://127.0.0.1:8000'];
+  DateTime get _dataHoraServidorAtual {
+    final server = _serverTimeAtSync;
+    final deviceSync = _deviceTimeAtSync;
+    if (server == null || deviceSync == null) {
+      return DateTime.now();
     }
-    if (_kUseRealDevice) {
-      // Celular real: tenta primeiro o IP do PC na rede local e, se falhar,
-      // fallback para localhost quando ADB reverse estiver ativo.
-      return [
-        _kCloudApiBaseUrl,
-        'http://$_kPcIpWifi:8000',
-        'http://127.0.0.1:8000',
-      ];
-    }
-    return const [
-      _kCloudApiBaseUrl,
-      'http://10.0.2.2:8000',
-      'http://127.0.0.1:8000',
-    ];
+    final elapsed = DateTime.now().difference(deviceSync);
+    return server.add(elapsed);
   }
 
-  Future<http.Response?> _getWithBackendFallback(String endpoint) async {
-    final ordered = <String>[?_effectiveBaseUrl, ..._baseUrlCandidates];
-
-    final tried = <String>{};
-    for (final base in ordered) {
-      if (!tried.add(base)) continue;
-      try {
-        final response = await http
-            .get(Uri.parse('$base$endpoint'))
-            .timeout(const Duration(seconds: 5));
-        if (response.statusCode < 500) {
-          _effectiveBaseUrl = base;
-          return response;
-        }
-      } catch (_) {
-        // Tenta o próximo candidato.
-      }
+  void _syncClockFromResponse(http.Response response) {
+    final headerDate = response.headers['date'];
+    if (headerDate == null) return;
+    try {
+      final parsedUtc = HttpDate.parse(headerDate);
+      _serverTimeAtSync = parsedUtc.toLocal();
+      _deviceTimeAtSync = DateTime.now();
+    } catch (_) {
+      // Mantem fallback para horario local.
     }
-    return null;
+  }
+
+  Future<http.Response?> _getFromProductionBackend(String endpoint) async {
+    try {
+      return await http
+          .get(Uri.parse('$kProductionApiBaseUrl$endpoint'))
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -2071,8 +2066,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _fetchDiagnostico() async {
     setState(() => carregandoDiagnostico = true);
     try {
-      final response = await _getWithBackendFallback('/diagnostico');
+      final response = await _getFromProductionBackend('/diagnostico');
       if (response != null && response.statusCode == 200) {
+        _syncClockFromResponse(response);
         final data = json.decode(response.body);
         setState(() {
           diagnostico = Diagnostico.fromJson(data);
@@ -2101,7 +2097,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     });
 
     try {
-      final response = await _getWithBackendFallback(
+      final response = await _getFromProductionBackend(
         '/gerar-jogos?estrategia=$estrategiaSelecionada',
       );
       if (response != null && response.statusCode == 200) {
@@ -2144,6 +2140,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           diagnostico: diagnostico,
           estrategia: estrategiaSelecionada,
           concursosAnalisados: diagnostico?.concursosAnalisados ?? 0,
+          dataHoraBase: _dataHoraServidorAtual,
         ),
       ),
     );
