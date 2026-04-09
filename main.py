@@ -36,6 +36,12 @@ CFG = {
 CSV_PATH = "historico.csv"
 API_BASE = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
 CSV_COLUMNS = ["Concurso"] + [f"Bola{i}" for i in range(1, 16)]
+API_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://loterias.caixa.gov.br/",
+}
 
 TAGS_ESTRATEGICAS = [
     "Foco em Dezenas Quentes",
@@ -53,6 +59,9 @@ TAGS_ESTRATEGICAS = [
 BORDAS_VOLANTE = {1, 2, 3, 4, 5, 6, 10, 11, 15, 16, 20, 21, 22, 23, 24, 25}
 DIAGONAIS_VOLANTE = {1, 5, 7, 9, 13, 17, 19, 21, 25}
 CRUZ_VOLANTE = {3, 8, 11, 12, 13, 14, 15, 18, 23}
+
+_api_session = requests.Session()
+_api_session.headers.update(API_HEADERS)
 
 
 def _padronizar_colunas_historico(df: pd.DataFrame) -> pd.DataFrame:
@@ -88,20 +97,20 @@ def _load_historico_df() -> pd.DataFrame:
 
 def _fetch_api_json(url: str) -> dict:
     """Busca JSON com timeout e validação HTTP."""
-    response = requests.get(url, timeout=10)
+    response = _api_session.get(url, timeout=10)
     response.raise_for_status()
     return response.json()
 
 
 def _fetch_latest_payload() -> dict:
-    """Busca o concurso mais recente, com fallback para API que usa endpoint raiz."""
-    try:
-        return _fetch_api_json(f"{API_BASE}/ultimo")
-    except requests.HTTPError as e:
-        status = e.response.status_code if e.response is not None else None
-        if status == 400:
-            return _fetch_api_json(API_BASE)
-        raise
+    """Busca o concurso mais recente com fallback entre contratos da API da Caixa."""
+    errors = []
+    for url in (API_BASE, f"{API_BASE}/ultimo"):
+        try:
+            return _fetch_api_json(url)
+        except requests.RequestException as e:
+            errors.append(f"{url}: {e}")
+    raise requests.HTTPError(" | ".join(errors))
 
 
 def _try_fetch_concurso_payload(concurso: int) -> dict | None:
