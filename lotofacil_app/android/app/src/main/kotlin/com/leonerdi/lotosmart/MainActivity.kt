@@ -1,4 +1,4 @@
-package com.example.lotofacil_app
+﻿package com.leonerdi.lotosmart
 
 import io.flutter.embedding.android.FlutterActivity
 
