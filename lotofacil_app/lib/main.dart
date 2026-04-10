@@ -310,7 +310,16 @@ class ResultadosPage extends StatelessWidget {
         '${_doisDigitos(agora.hour)}:${_doisDigitos(agora.minute)}';
   }
 
-  pw.Widget _fundoTimbrado() {
+  Future<pw.MemoryImage?> _carregarLogoTimbrado() async {
+    try {
+      final bytes = await rootBundle.load('assets/icon/app_icon.png');
+      return pw.MemoryImage(bytes.buffer.asUint8List());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  pw.Widget _fundoTimbrado(pw.MemoryImage? logo) {
     return pw.Positioned.fill(
       child: pw.Opacity(
         opacity: 0.08,
@@ -320,26 +329,33 @@ class ResultadosPage extends StatelessWidget {
             child: pw.Column(
               mainAxisSize: pw.MainAxisSize.min,
               children: [
-                pw.Container(
-                  width: 160,
-                  height: 160,
-                  decoration: pw.BoxDecoration(
-                    shape: pw.BoxShape.circle,
-                    border: pw.Border.all(
-                      color: PdfColor.fromInt(0xFF7B1FA2),
-                      width: 3,
+                if (logo != null)
+                  pw.SizedBox(
+                    width: 170,
+                    height: 170,
+                    child: pw.Image(logo, fit: pw.BoxFit.contain),
+                  )
+                else
+                  pw.Container(
+                    width: 160,
+                    height: 160,
+                    decoration: pw.BoxDecoration(
+                      shape: pw.BoxShape.circle,
+                      border: pw.Border.all(
+                        color: PdfColor.fromInt(0xFF7B1FA2),
+                        width: 3,
+                      ),
+                    ),
+                    alignment: pw.Alignment.center,
+                    child: pw.Text(
+                      'LS',
+                      style: pw.TextStyle(
+                        fontSize: 58,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColor.fromInt(0xFF7B1FA2),
+                      ),
                     ),
                   ),
-                  alignment: pw.Alignment.center,
-                  child: pw.Text(
-                    'LIA',
-                    style: pw.TextStyle(
-                      fontSize: 58,
-                      fontWeight: pw.FontWeight.bold,
-                      color: PdfColor.fromInt(0xFF7B1FA2),
-                    ),
-                  ),
-                ),
                 pw.SizedBox(height: 14),
                 pw.Text(
                   'LOTOSMART',
@@ -396,13 +412,14 @@ class ResultadosPage extends StatelessWidget {
     required int index,
     required JogoIA jogo,
     required String emissao,
+    required pw.MemoryImage? timbreLogo,
   }) {
     return pw.Page(
       pageFormat: PdfPageFormat.a5,
       margin: const pw.EdgeInsets.fromLTRB(16, 16, 16, 16),
       build: (_) => pw.Stack(
         children: [
-          _fundoTimbrado(),
+          _fundoTimbrado(timbreLogo),
           pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.stretch,
             children: [
@@ -486,8 +503,16 @@ class ResultadosPage extends StatelessWidget {
       final jogo = jogos[i];
       final pdf = pw.Document();
       final emissao = _dataHoraEmissao();
+      final timbreLogo = await _carregarLogoTimbrado();
 
-      pdf.addPage(_buildPaginaJogo(index: i, jogo: jogo, emissao: emissao));
+      pdf.addPage(
+        _buildPaginaJogo(
+          index: i,
+          jogo: jogo,
+          emissao: emissao,
+          timbreLogo: timbreLogo,
+        ),
+      );
 
       final bytes = await pdf.save();
       await Printing.sharePdf(
@@ -507,10 +532,18 @@ class ResultadosPage extends StatelessWidget {
     try {
       final pdf = pw.Document();
       final emissao = _dataHoraEmissao();
+      final timbreLogo = await _carregarLogoTimbrado();
 
       for (int i = 0; i < jogos.length; i++) {
         final jogo = jogos[i];
-        pdf.addPage(_buildPaginaJogo(index: i, jogo: jogo, emissao: emissao));
+        pdf.addPage(
+          _buildPaginaJogo(
+            index: i,
+            jogo: jogo,
+            emissao: emissao,
+            timbreLogo: timbreLogo,
+          ),
+        );
       }
 
       final bytes = await pdf.save();
@@ -2245,6 +2278,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     try {
       final pdf = pw.Document();
       final sorted = List<int>.from(numeros)..sort();
+      pw.MemoryImage? timbreLogo;
+      try {
+        final logoBytes = await rootBundle.load('assets/icon/app_icon.png');
+        timbreLogo = pw.MemoryImage(logoBytes.buffer.asUint8List());
+      } catch (_) {
+        timbreLogo = null;
+      }
+
       List<List<int>> matriz = List.generate(
         3,
         (i) => sorted.sublist(i * 5, i * 5 + 5),
@@ -2253,61 +2294,80 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       pdf.addPage(
         pw.Page(
           pageFormat: PdfPageFormat.a4,
-          build: (pw.Context ctx) => pw.Column(
-            mainAxisAlignment: pw.MainAxisAlignment.center,
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
+          build: (pw.Context ctx) => pw.Stack(
             children: [
-              pw.Text(
-                'LOTOSMART',
-                style: pw.TextStyle(
-                  fontSize: 24,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColor.fromInt(0xFF4A148C),
-                ),
-              ),
-              pw.SizedBox(height: 20),
-              pw.Text(
-                'VOLANTE — 15 NÚMEROS',
-                style: pw.TextStyle(
-                  fontSize: 14,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.SizedBox(height: 20),
-              pw.Table(
-                border: pw.TableBorder.all(
-                  color: PdfColor.fromInt(0xFF000000),
-                  width: 2,
-                ),
-                children: matriz
-                    .map(
-                      (linha) => pw.TableRow(
-                        children: linha
-                            .map(
-                              (n) => pw.Container(
-                                padding: const pw.EdgeInsets.all(15),
-                                child: pw.Center(
-                                  child: pw.Text(
-                                    n.toString().padLeft(2, '0'),
-                                    style: pw.TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: pw.FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            )
-                            .toList(),
+              if (timbreLogo != null)
+                pw.Positioned.fill(
+                  child: pw.Opacity(
+                    opacity: 0.08,
+                    child: pw.Center(
+                      child: pw.SizedBox(
+                        width: 250,
+                        height: 250,
+                        child: pw.Image(timbreLogo, fit: pw.BoxFit.contain),
                       ),
-                    )
-                    .toList(),
-              ),
-              pw.SizedBox(height: 30),
-              pw.Text(
-                'Gerado por: LotoSmart',
-                style: pw.TextStyle(
-                  fontSize: 10,
-                  color: PdfColor.fromInt(0xFF999999),
+                    ),
+                  ),
+                ),
+              pw.Center(
+                child: pw.Column(
+                  mainAxisAlignment: pw.MainAxisAlignment.center,
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    pw.Text(
+                      'LOTOSMART',
+                      style: pw.TextStyle(
+                        fontSize: 24,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColor.fromInt(0xFF4A148C),
+                      ),
+                    ),
+                    pw.SizedBox(height: 20),
+                    pw.Text(
+                      'VOLANTE — 15 NÚMEROS',
+                      style: pw.TextStyle(
+                        fontSize: 14,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 20),
+                    pw.Table(
+                      border: pw.TableBorder.all(
+                        color: PdfColor.fromInt(0xFF000000),
+                        width: 2,
+                      ),
+                      children: matriz
+                          .map(
+                            (linha) => pw.TableRow(
+                              children: linha
+                                  .map(
+                                    (n) => pw.Container(
+                                      padding: const pw.EdgeInsets.all(15),
+                                      child: pw.Center(
+                                        child: pw.Text(
+                                          n.toString().padLeft(2, '0'),
+                                          style: pw.TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: pw.FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                    pw.SizedBox(height: 30),
+                    pw.Text(
+                      'Gerado por: LotoSmart',
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        color: PdfColor.fromInt(0xFF999999),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
