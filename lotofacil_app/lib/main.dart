@@ -1593,7 +1593,7 @@ class _CompliancePageState extends State<CompliancePage> {
   bool _salvando = false;
   bool _naoMostrarNovamente = false;
   static final Uri _jogoResponsavelUri = Uri.parse(
-    'https://www.caixa.gov.br/loterias/Paginas/jogo-responsavel.aspx',
+    'https://www.caixa.gov.br/jogo-responsavel/Paginas/default.aspx',
   );
 
   Future<void> _aceitarTermos() async {
@@ -1608,7 +1608,24 @@ class _CompliancePageState extends State<CompliancePage> {
   }
 
   Future<void> _abrirJogoResponsavel() async {
-    await launchUrl(_jogoResponsavelUri, mode: LaunchMode.externalApplication);
+    try {
+      final abriu = await launchUrl(
+        _jogoResponsavelUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (abriu) {
+        return;
+      }
+    } catch (_) {
+      // Exibe aviso amigável abaixo.
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Nao foi possivel abrir o link agora. Tente novamente.'),
+      ),
+    );
   }
 
   @override
@@ -1835,6 +1852,7 @@ class Diagnostico {
   final String alertaPadrao;
   final double probabilidadePadrao;
   final String faixaDominante;
+  final int ultimoConcurso;
   final int proximoConcurso;
   final double desvioPadraoSoma;
   final String similaridadeTexto;
@@ -1853,6 +1871,7 @@ class Diagnostico {
     required this.alertaPadrao,
     required this.probabilidadePadrao,
     required this.faixaDominante,
+    required this.ultimoConcurso,
     required this.proximoConcurso,
     required this.desvioPadraoSoma,
     required this.similaridadeTexto,
@@ -1892,6 +1911,10 @@ class Diagnostico {
       probabilidadePadrao:
           (alerta['probabilidade_percentual'] as num?)?.toDouble() ?? 0,
       faixaDominante: alerta['intervalo'] ?? 'N/D',
+        ultimoConcurso:
+          (inteligencia['ultimo_concurso'] as num?)?.toInt() ??
+          (json['ultimo_concurso'] as num?)?.toInt() ??
+          (json['concursos_analisados'] as num).toInt(),
       proximoConcurso: (inteligencia['proximo_concurso'] as num?)?.toInt() ?? 0,
       desvioPadraoSoma:
           (json['equilibrio']['desvio_padrao_soma'] as num?)?.toDouble() ?? 0,
@@ -3010,7 +3033,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           ),
                         ),
                         child: Text(
-                          'A IA está analisando os últimos ${d.concursosAnalisados} concursos para otimizar estes parâmetros.',
+                          'A IA está analisando o histórico até o concurso ${d.ultimoConcurso} para otimizar estes parâmetros.',
                           style: TextStyle(
                             fontSize: 11,
                             color: theme.colorScheme.primary,

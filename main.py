@@ -3,12 +3,19 @@ import numpy as np
 import random
 import os
 import logging
+import time
+import threading
 import requests
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from collections import Counter
 from itertools import combinations
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover - fallback defensivo
+    ZoneInfo = None
 
 app = FastAPI()
 
@@ -31,6 +38,13 @@ CFG = {
     "NUM_GAMES": 10,
     "SOMA_MIN": 170,
     "SOMA_MAX": 220,
+    "SYNC_BASE_INTERVAL_SECONDS": int(os.getenv("SYNC_BASE_INTERVAL_SECONDS", "3600")),
+    "SYNC_PREP_INTERVAL_SECONDS": int(os.getenv("SYNC_PREP_INTERVAL_SECONDS", "300")),
+    "SYNC_PEAK_INTERVAL_SECONDS": int(os.getenv("SYNC_PEAK_INTERVAL_SECONDS", "120")),
+    "SYNC_TARGET_HOUR_BRT": int(os.getenv("SYNC_TARGET_HOUR_BRT", "20")),
+    "SYNC_TARGET_MINUTE_BRT": int(os.getenv("SYNC_TARGET_MINUTE_BRT", "45")),
+    "SYNC_PREP_WINDOW_MINUTES": int(os.getenv("SYNC_PREP_WINDOW_MINUTES", "45")),
+    "SYNC_PEAK_WINDOW_MINUTES": int(os.getenv("SYNC_PEAK_WINDOW_MINUTES", "120")),
 }
 
 CSV_PATH = "historico.csv"
@@ -62,6 +76,96 @@ CRUZ_VOLANTE = {3, 8, 11, 12, 13, 14, 15, 18, 23}
 
 _api_session = requests.Session()
 _api_session.headers.update(API_HEADERS)
+
+_sync_lock = threading.Lock()
+_cache_lock = threading.Lock()
+_last_sync_attempt_ts = 0.0
+_last_sync_result = {
+    "status": "idle",
+    "atualizado": False,
+    "mensagem": "Sincronização ainda não executada neste processo.",
+}
+
+_runtime_cache = {
+    "historico": {"key": None, "data": None},
+    "contexto": {"key": None, "data": None},
+    "response": {},
+}
+
+if ZoneInfo is not None:
+    BRT_TZ = ZoneInfo("America/Sao_Paulo")
+else:
+    # Fallback fixo para UTC-3 caso a base de fusos não esteja disponível.
+    BRT_TZ = timezone(timedelta(hours=-3))
+
+
+def _now_brt() -> datetime:
+    return datetime.now(BRT_TZ)
+
+
+def _invalidate_runtime_cache() -> None:
+    with _cache_lock:
+        _runtime_cache["historico"] = {"key": None, "data": None}
+        _runtime_cache["contexto"] = {"key": None, "data": None}
+        _runtime_cache["response"].clear()
+
+
+def _historico_cache_key() -> tuple:
+    if not os.path.exists(CSV_PATH):
+        return ("missing", 0)
+    stat = os.stat(CSV_PATH)
+    # mtime_ns + size evita cache stale em atualizações rápidas.
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def _get_cached_response(key: str, ttl_seconds: int):
+    now = time.time()
+    with _cache_lock:
+        entry = _runtime_cache["response"].get(key)
+        if not entry:
+            return None
+        if now - entry["ts"] > ttl_seconds:
+            _runtime_cache["response"].pop(key, None)
+            return None
+        return entry["data"]
+
+
+def _set_cached_response(key: str, data) -> None:
+    with _cache_lock:
+        _runtime_cache["response"][key] = {"ts": time.time(), "data": data}
+
+
+def _compute_sync_interval_seconds(now_brt: datetime) -> int:
+    """
+    Ajusta a cadência de sync para ficar mais próxima da publicação da Caixa:
+    - Fora da janela: polling leve.
+    - Janela pré-publicação: polling médio.
+    - Janela pós-publicação (pico): polling rápido.
+    """
+    base_interval = max(300, int(CFG["SYNC_BASE_INTERVAL_SECONDS"]))
+    prep_interval = max(60, int(CFG["SYNC_PREP_INTERVAL_SECONDS"]))
+    peak_interval = max(60, int(CFG["SYNC_PEAK_INTERVAL_SECONDS"]))
+
+    # Lotofácil: concurso regular de segunda a sábado.
+    is_draw_day = now_brt.weekday() in (0, 1, 2, 3, 4, 5)
+    if not is_draw_day:
+        return base_interval
+
+    target = now_brt.replace(
+        hour=int(CFG["SYNC_TARGET_HOUR_BRT"]),
+        minute=int(CFG["SYNC_TARGET_MINUTE_BRT"]),
+        second=0,
+        microsecond=0,
+    )
+
+    prep_start = target - timedelta(minutes=int(CFG["SYNC_PREP_WINDOW_MINUTES"]))
+    peak_end = target + timedelta(minutes=int(CFG["SYNC_PEAK_WINDOW_MINUTES"]))
+
+    if now_brt < prep_start or now_brt > peak_end:
+        return base_interval
+    if now_brt < target:
+        return prep_interval
+    return peak_interval
 
 
 def _padronizar_colunas_historico(df: pd.DataFrame) -> pd.DataFrame:
@@ -206,6 +310,7 @@ def sync_database() -> dict:
             df_total[col] = pd.to_numeric(df_total[col], errors="coerce").fillna(0).astype(int)
 
         df_total.to_csv(CSV_PATH, index=False)
+        _invalidate_runtime_cache()
 
         logger.info(
             "Sync concluído: +%s concursos (local %s -> %s)",
@@ -231,36 +336,129 @@ def sync_database() -> dict:
         }
 
 
+def ensure_database_synced(force: bool = False) -> dict:
+    """
+    Garante sync automático por janela de tempo para manter a base atualizada.
+    Evita chamadas excessivas à API e concorrência entre requisições simultâneas.
+    """
+    global _last_sync_attempt_ts, _last_sync_result
+
+    now = time.time()
+    now_brt = _now_brt()
+    interval = _compute_sync_interval_seconds(now_brt)
+    elapsed = now - _last_sync_attempt_ts
+
+    if not force and _last_sync_attempt_ts > 0 and elapsed < interval:
+        return {
+            "status": "skip",
+            "atualizado": False,
+            "mensagem": "Sync recente; aguardando próxima janela automática.",
+            "proxima_tentativa_em_segundos": int(interval - elapsed),
+            "intervalo_atual_segundos": interval,
+            "horario_referencia_brt": now_brt.strftime("%Y-%m-%d %H:%M:%S"),
+            "ultimo_resultado": _last_sync_result,
+        }
+
+    if not _sync_lock.acquire(blocking=False):
+        return {
+            "status": "busy",
+            "atualizado": False,
+            "mensagem": "Sync já em execução por outra requisição.",
+            "intervalo_atual_segundos": interval,
+            "horario_referencia_brt": now_brt.strftime("%Y-%m-%d %H:%M:%S"),
+            "ultimo_resultado": _last_sync_result,
+        }
+
+    try:
+        _last_sync_attempt_ts = now
+        _last_sync_result = sync_database()
+        return _last_sync_result
+    finally:
+        _sync_lock.release()
+
+
 def load_historico_blindado():
+    cache_key = _historico_cache_key()
+    with _cache_lock:
+        cached = _runtime_cache["historico"]
+        if cached["key"] == cache_key and cached["data"] is not None:
+            return cached["data"]
+
     if not os.path.exists(CSV_PATH):
         print(f"AVISO: {CSV_PATH} não encontrado. Usando dados temporários.")
-        return [sorted(random.sample(range(1, 26), 15)) for _ in range(300)]
+        historico_tmp = [sorted(random.sample(range(1, 26), 15)) for _ in range(300)]
+        with _cache_lock:
+            _runtime_cache["historico"] = {"key": cache_key, "data": historico_tmp}
+        return historico_tmp
+
     try:
         df = _load_historico_df()
         if df.empty:
-            return [sorted(random.sample(range(1, 26), 15)) for _ in range(300)]
+            historico_tmp = [sorted(random.sample(range(1, 26), 15)) for _ in range(300)]
+            with _cache_lock:
+                _runtime_cache["historico"] = {"key": cache_key, "data": historico_tmp}
+            return historico_tmp
+
         dados_puros = df.iloc[:, 1:16].values.tolist()
         historico = []
         for sorteio in dados_puros:
             if len(sorteio) == 15:
                 historico.append(sorted([int(n) for n in sorteio]))
+
+        with _cache_lock:
+            _runtime_cache["historico"] = {"key": cache_key, "data": historico}
         return historico
     except Exception as e:
         print(f"Erro ao processar o CSV local: {e}")
-        return [sorted(random.sample(range(1, 26), 15)) for _ in range(300)]
+        historico_tmp = [sorted(random.sample(range(1, 26), 15)) for _ in range(300)]
+        with _cache_lock:
+            _runtime_cache["historico"] = {"key": cache_key, "data": historico_tmp}
+        return historico_tmp
+
+
+def _get_contexto_analitico(historico):
+    cache_key = _historico_cache_key()
+    with _cache_lock:
+        cached = _runtime_cache["contexto"]
+        if cached["key"] == cache_key and cached["data"] is not None:
+            return cached["data"]
+
+    stats = get_stats(historico)
+    freq = stats["freq"]
+    short_freq = get_freq_window(historico, CFG["WINDOW_SHORT"])
+    delay_map = get_delay_map(historico)
+    tendencias = calcular_tendencias(historico)
+    hot_set = {item["dezena"] for item in tendencias["hot"]}
+    cold_set = {item["dezena"] for item in tendencias["cold"]}
+    equilibrio = calcular_equilibrio(historico)
+
+    contexto = {
+        "freq": freq,
+        "short_freq": short_freq,
+        "delay_map": delay_map,
+        "tendencias": tendencias,
+        "hot_set": hot_set,
+        "cold_set": cold_set,
+        "equilibrio": equilibrio,
+    }
+
+    with _cache_lock:
+        _runtime_cache["contexto"] = {"key": cache_key, "data": contexto}
+
+    return contexto
 
 
 @app.on_event("startup")
 def startup_sync():
     """Gatilho automático de atualização ao iniciar o servidor."""
-    result = sync_database()
+    result = ensure_database_synced(force=True)
     logger.info("Startup sync result: %s", result)
 
 
 @app.get("/admin/sync")
 def admin_sync():
     """Força sincronização manual sem derrubar o serviço em caso de erro."""
-    return sync_database()
+    return ensure_database_synced(force=True)
 
 
 def get_stats(hist):
@@ -392,46 +590,86 @@ def calcular_alerta_probabilistico(historico):
             "probabilidade_percentual": 0.0,
             "media_recente": 0.0,
             "media_base": 0.0,
+            "corredor": "10-20",
+            "faixas_probabilidade": [],
             "mensagem": "Sem dados suficientes para inferir corredores dominantes.",
         }
 
     janela_recente = historico[-30:] if len(historico) >= 30 else historico
     janela_base = historico[-120:] if len(historico) >= 120 else historico
 
-    corredores = [
-        ("01-09", 1, 9),
-        ("10-20", 10, 20),
-        ("21-25", 21, 25),
-    ]
-    analises = []
+    # Corredor monitorado para estratégia de concentração.
+    corredor_label = "10-20"
+    inicio, fim = 10, 20
 
-    for label, inicio, fim in corredores:
-        base_counts = [sum(1 for n in draw if inicio <= n <= fim) for draw in janela_base]
-        recent_counts = [sum(1 for n in draw if inicio <= n <= fim) for draw in janela_recente]
-        media_base = float(np.mean(base_counts)) if base_counts else 0.0
-        media_recente = float(np.mean(recent_counts)) if recent_counts else 0.0
-        desvio_base = float(np.std(base_counts)) if base_counts else 0.0
-        z_score = (media_recente - media_base) / (desvio_base or 1.0)
-        threshold = max(1, int(round(media_recente)))
-        prob = float(np.mean([c >= threshold for c in base_counts])) if base_counts else 0.0
-        analises.append(
+    def _classificar_faixa(qtd_no_corredor: int) -> str:
+        if qtd_no_corredor <= 5:
+            return "0-5"
+        if qtd_no_corredor <= 10:
+            return "6-10"
+        return "11-15"
+
+    base_counts = [sum(1 for n in draw if inicio <= n <= fim) for draw in janela_base]
+    recent_counts = [sum(1 for n in draw if inicio <= n <= fim) for draw in janela_recente]
+
+    base_bins = Counter(_classificar_faixa(c) for c in base_counts)
+    recent_bins = Counter(_classificar_faixa(c) for c in recent_counts)
+
+    faixas = ["0-5", "6-10", "11-15"]
+    total_base = len(base_counts) or 1
+    total_recent = len(recent_counts) or 1
+    faixas_probabilidade = []
+
+    for faixa in faixas:
+        prob_base = (base_bins.get(faixa, 0) / total_base) * 100
+        prob_recente = (recent_bins.get(faixa, 0) / total_recent) * 100
+        faixas_probabilidade.append(
             {
-                "intervalo": label,
-                "probabilidade_percentual": round(prob * 100, 1),
-                "media_recente": round(media_recente, 2),
-                "media_base": round(media_base, 2),
-                "z_score": round(z_score, 3),
+                "faixa": faixa,
+                "probabilidade_percentual": round(prob_base, 1),
+                "ocorrencias_base": int(base_bins.get(faixa, 0)),
+                "ocorrencias_recentes": int(recent_bins.get(faixa, 0)),
+                "tendencia_pp": round(prob_recente - prob_base, 1),
             }
         )
 
-    melhor = max(analises, key=lambda item: (item["z_score"], item["probabilidade_percentual"]))
-    intensidade = "moderada" if melhor["z_score"] < 0.6 else "elevada"
-    melhor["mensagem"] = (
-        f"Foi detectada probabilidade {intensidade} de concentracao no corredor {melhor['intervalo']} "
-        f"(media recente {melhor['media_recente']} vs base {melhor['media_base']}; "
-        f"aderencia historica {melhor['probabilidade_percentual']}%)."
+    # Melhor faixa: prioriza recorrência recente, depois aderência histórica.
+    melhor = max(
+        faixas_probabilidade,
+        key=lambda item: (
+            item["ocorrencias_recentes"],
+            item["probabilidade_percentual"],
+            item["tendencia_pp"],
+        ),
     )
-    return melhor
+
+    top_sugestoes = sorted(
+        faixas_probabilidade,
+        key=lambda item: (
+            item["ocorrencias_recentes"],
+            item["probabilidade_percentual"],
+            item["tendencia_pp"],
+        ),
+        reverse=True,
+    )[:2]
+
+    media_base = float(np.mean(base_counts)) if base_counts else 0.0
+    media_recente = float(np.mean(recent_counts)) if recent_counts else 0.0
+    sugestao_txt = " e ".join(item["faixa"] for item in top_sugestoes)
+
+    return {
+        "intervalo": melhor["faixa"],
+        "corredor": corredor_label,
+        "probabilidade_percentual": melhor["probabilidade_percentual"],
+        "media_recente": round(media_recente, 2),
+        "media_base": round(media_base, 2),
+        "faixas_probabilidade": faixas_probabilidade,
+        "mensagem": (
+            f"No corredor {corredor_label}, a faixa mais aderente foi {melhor['faixa']} "
+            f"(probabilidade historica {melhor['probabilidade_percentual']}%). "
+            f"Sugestao de foco: {sugestao_txt}."
+        ),
+    }
 
 
 def calcular_penalidade_anti_divisao(jogo):
@@ -556,39 +794,46 @@ def escolher_tag(jogo, hot_set, cold_set, soma_ideal, estrategia="equilibrado"):
 
 @app.get("/diagnostico")
 def diagnostico():
+    ensure_database_synced()
+    cache_key = f"diagnostico:{_historico_cache_key()}"
+    cached = _get_cached_response(cache_key, ttl_seconds=20)
+    if cached is not None:
+        return cached
+
     historico = load_historico_blindado()
     regime = calcular_regime(historico)
-    tendencias = calcular_tendencias(historico)
-    equilibrio = calcular_equilibrio(historico)
+    contexto = _get_contexto_analitico(historico)
+    tendencias = contexto["tendencias"]
+    equilibrio = contexto["equilibrio"]
     inteligencia = obter_contexto_inteligente(historico)
-    return {
+    payload = {
         "status": "sucesso",
         "concursos_analisados": len(historico),
+        "ultimo_concurso": inteligencia.get("ultimo_concurso", len(historico)),
         "regime": regime,
         "tendencias": tendencias,
         "equilibrio": equilibrio,
         "inteligencia": inteligencia,
     }
+    _set_cached_response(cache_key, payload)
+    return payload
 
 
 @app.get("/gerar-jogos")
 def gerar(estrategia: str = "equilibrado"):
+    ensure_database_synced()
     estrategia = (estrategia or "equilibrado").lower().strip()
     if estrategia not in {"equilibrado", "quentes", "atrasados", "anti_divisao"}:
         estrategia = "equilibrado"
 
     historico = load_historico_blindado()
-    stats = get_stats(historico)
-    freq = stats["freq"]
-    short_freq = get_freq_window(historico, CFG["WINDOW_SHORT"])
-    delay_map = get_delay_map(historico)
-
-    tendencias = calcular_tendencias(historico)
-    hot_set = {item["dezena"] for item in tendencias["hot"]}
-    cold_set = {item["dezena"] for item in tendencias["cold"]}
-
-    equilibrio = calcular_equilibrio(historico)
-    soma_ideal = equilibrio["soma_ideal"]
+    contexto = _get_contexto_analitico(historico)
+    freq = contexto["freq"]
+    short_freq = contexto["short_freq"]
+    delay_map = contexto["delay_map"]
+    hot_set = contexto["hot_set"]
+    cold_set = contexto["cold_set"]
+    soma_ideal = contexto["equilibrio"]["soma_ideal"]
 
     candidates = []
     for _ in range(CFG["CANDIDATES"]):
@@ -744,8 +989,16 @@ def similaridade():
     Compara a janela recente (últimos 5 concursos) com o histórico completo.
     Retorna o ciclo histórico mais similar com percentual de confiança.
     """
+    ensure_database_synced()
+    cache_key = f"similaridade:{_historico_cache_key()}"
+    cached = _get_cached_response(cache_key, ttl_seconds=45)
+    if cached is not None:
+        return cached
+
     historico = load_historico_blindado()
-    return _find_similar_cycle(historico, window_size=5)
+    payload = _find_similar_cycle(historico, window_size=5)
+    _set_cached_response(cache_key, payload)
+    return payload
 
 
 if __name__ == "__main__":
