@@ -30,7 +30,7 @@ const String kProductionApiBaseUrl = String.fromEnvironment(
 const kLotofacilPurple = Color(0xFF7B1FA2);
 const kLotofacilPurpleGlow = Color(0xFFA855F7);
 const kSignalGreen = Color(0xFF16C784);
-const kComplianceAcceptedKey = 'compliance_accepted_v1';
+const kComplianceHideMessageKey = 'compliance_hide_message_v2';
 const kCaixaBlue = Color(0xFF005CA9);
 const kThemeModeStorageKey = 'isDarkMode';
 
@@ -259,11 +259,9 @@ Widget buildResponsibleFooter(BoxConstraints c, {double bottom = 30}) {
   );
 }
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   await kThemeService.load();
-
   runApp(const LotoApp());
 }
 
@@ -878,11 +876,13 @@ class WebViewScreen extends StatefulWidget {
   State<WebViewScreen> createState() => _WebViewScreenState();
 }
 
-class _WebViewScreenState extends State<WebViewScreen> with CodeAutoFill {
+class _WebViewScreenState extends State<WebViewScreen>
+    with CodeAutoFill, WidgetsBindingObserver {
   // Mobile (Android/iOS)
   WebViewController? _mobileController;
-  WebViewCookieManager? _cookieManager;
-  static const String _cookieStorageKey = 'caixa_webview_cookies_v1';
+  // User-Agent mobile usado pelo CEF (desktop) e como fallback no Android.
+  // No Android, o UA real do dispositivo é obtido dinamicamente em _initMobileWebView
+  // para que o site da Caixa reconheça o aparelho como Chrome legítimo.
   static const String _mobileUserAgent =
       'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36';
   // Desktop/Windows (CEF)
@@ -891,12 +891,16 @@ class _WebViewScreenState extends State<WebViewScreen> with CodeAutoFill {
   bool overlayHovered = false;
   bool overlayMinimizado = false;
   Offset? overlayOffset;
+  PageController? _overlayPageController;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (widget.jogos != null && widget.jogos!.isNotEmpty) {
+      _overlayPageController = PageController(initialPage: jogoAtualOverlay);
+    }
     if (Platform.isAndroid || Platform.isIOS) {
-      _cookieManager = WebViewCookieManager();
       final PlatformWebViewControllerCreationParams params =
           const PlatformWebViewControllerCreationParams();
       final controller = WebViewController.fromPlatformCreationParams(params)
@@ -910,8 +914,8 @@ class _WebViewScreenState extends State<WebViewScreen> with CodeAutoFill {
       // o gerenciador de senhas do sistema.
       if (controller.platform is AndroidWebViewController) {
         AndroidWebViewController.enableDebugging(false);
-        (controller.platform as AndroidWebViewController)
-            .setMediaPlaybackRequiresUserGesture(false);
+        final androidCtrl = controller.platform as AndroidWebViewController;
+        androidCtrl.setMediaPlaybackRequiresUserGesture(false);
       }
 
       _mobileController = controller;
@@ -982,8 +986,22 @@ class _WebViewScreenState extends State<WebViewScreen> with CodeAutoFill {
     final controller = _mobileController;
     if (controller == null) return;
 
-    await _restoreCookies();
-    await controller.setUserAgent(_mobileUserAgent);
+    // Obtém o User-Agent nativo do sistema (modelo real do dispositivo,
+    // versão real do Android e do Chrome WebView instalado).
+    // Em seguida remove o token "; wv" que identifica o processo como
+    // WebView embarcado — sem ele, o site da Caixa trata a sessão como
+    // um Chrome regular e mantém o cookie de confiança do dispositivo,
+    // evitando o pedido de 2FA a cada acesso.
+    //
+    // Os cookies (incluindo HttpOnly) são persistidos automaticamente pelo
+    // CookieManager nativo do Android na pasta privada do app e restaurados
+    // na próxima abertura sem nenhum código extra.
+    final rawUA = (await controller.getUserAgent()) ?? '';
+    final String deviceUA = rawUA.isNotEmpty
+        ? rawUA.replaceAll('; wv', '')
+        : _mobileUserAgent;
+    await controller.setUserAgent(deviceUA);
+
     await controller.loadRequest(Uri.parse(widget.url));
   }
 
@@ -992,71 +1010,64 @@ class _WebViewScreenState extends State<WebViewScreen> with CodeAutoFill {
     if (controller != null) {
       try {
         await controller.runJavaScript(_responsiveViewportScript);
+        await _focusOtpField();
       } catch (_) {
         // Falha silenciosa para não interromper a navegação.
       }
     }
-    await _syncCookiesToStorage();
+    // Os cookies (incluindo HttpOnly, usados para confiança de dispositivo)
+    // são gerenciados automaticamente pelo CookieManager nativo do Android.
+    // Não usamos document.cookie via JS porque ele NÃO retorna cookies HttpOnly.
   }
 
-  Future<void> _syncCookiesToStorage() async {
+  Future<void> _focusOtpField() async {
     final controller = _mobileController;
     if (controller == null) return;
+    const js = '''
+      (function() {
+        const selectors = [
+          'input[autocomplete="one-time-code"]',
+          'input[name*="otp" i]',
+          'input[name*="token" i]',
+          'input[name*="codigo" i]',
+          'input[id*="otp" i]',
+          'input[id*="token" i]',
+          'input[id*="codigo" i]',
+          'input[type="tel"]',
+          'input[type="number"]'
+        ];
+        let target = null;
+        for (const s of selectors) {
+          target = document.querySelector(s);
+          if (target) break;
+        }
+        if (!target) return false;
+        try {
+          target.setAttribute('autocomplete', 'one-time-code');
+          target.setAttribute('inputmode', 'numeric');
+          target.setAttribute('autocorrect', 'off');
+          target.setAttribute('autocapitalize', 'off');
+          target.setAttribute('spellcheck', 'false');
+        } catch (e) {}
+        target.focus();
+        if (typeof target.click === 'function') {
+          target.click();
+        }
+        return true;
+      })();
+    ''';
     try {
-      final raw = await controller.runJavaScriptReturningResult(
-        'document.cookie',
-      );
-      final normalized = _normalizeJsString(raw);
-      if (normalized.trim().isEmpty) return;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_cookieStorageKey, normalized);
+      await controller.runJavaScript(js);
     } catch (_) {
-      // Falha silenciosa: alguns cookies podem ser HttpOnly e indisponíveis no JS.
+      // Falha silenciosa para manter a navegação estável.
     }
   }
 
-  Future<void> _restoreCookies() async {
-    final manager = _cookieManager;
-    if (manager == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    final serialized = prefs.getString(_cookieStorageKey);
-    if (serialized == null || serialized.trim().isEmpty) return;
-
-    final pairs = serialized.split(';');
-    for (final pair in pairs) {
-      final token = pair.trim();
-      if (token.isEmpty || !token.contains('=')) continue;
-      final idx = token.indexOf('=');
-      final name = token.substring(0, idx).trim();
-      final value = token.substring(idx + 1).trim();
-      if (name.isEmpty) continue;
-
-      await manager.setCookie(
-        WebViewCookie(
-          name: name,
-          value: value,
-          domain: '.caixa.gov.br',
-          path: '/',
-        ),
-      );
-      await manager.setCookie(
-        WebViewCookie(
-          name: name,
-          value: value,
-          domain: 'loterias.caixa.gov.br',
-          path: '/',
-        ),
-      );
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      Future<void>.delayed(const Duration(milliseconds: 300), _focusOtpField);
     }
-  }
-
-  String _normalizeJsString(Object value) {
-    var text = value.toString().trim();
-    if ((text.startsWith('"') && text.endsWith('"')) ||
-        (text.startsWith("'") && text.endsWith("'"))) {
-      text = text.substring(1, text.length - 1);
-    }
-    return text;
   }
 
   @override
@@ -1123,6 +1134,8 @@ class _WebViewScreenState extends State<WebViewScreen> with CodeAutoFill {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _overlayPageController?.dispose();
     if (Platform.isAndroid) {
       cancel();
     }
@@ -1144,6 +1157,9 @@ class _WebViewScreenState extends State<WebViewScreen> with CodeAutoFill {
 
     final totalJogos = widget.jogos!.length;
     final currentIndex = jogoAtualOverlay.clamp(0, totalJogos - 1);
+    final pageController = _overlayPageController ??= PageController(
+      initialPage: currentIndex,
+    );
     final jogoAtual = List<int>.from(
       widget.jogos![currentIndex]['jogo'] as List,
     );
@@ -1198,6 +1214,19 @@ class _WebViewScreenState extends State<WebViewScreen> with CodeAutoFill {
       });
     }
 
+    void navegarParaIndice(int novoIndice) {
+      if (novoIndice < 0 || novoIndice >= totalJogos) return;
+      if (novoIndice == jogoAtualOverlay) return;
+      setState(() => jogoAtualOverlay = novoIndice);
+      if (pageController.hasClients) {
+        pageController.animateToPage(
+          novoIndice,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    }
+
     if (overlayOffset == null || overlayOffset != posicaoAjustada) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -1216,7 +1245,6 @@ class _WebViewScreenState extends State<WebViewScreen> with CodeAutoFill {
           duration: const Duration(milliseconds: 180),
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanUpdate: moverOverlay,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 220),
               width: overlayMinimizado ? miniOverlayWidth : fullOverlayWidth,
@@ -1241,152 +1269,179 @@ class _WebViewScreenState extends State<WebViewScreen> with CodeAutoFill {
               ),
               padding: EdgeInsets.all(contentPadding),
               child: overlayMinimizado
-                  ? Row(
-                      children: [
-                        Container(
-                          width: 34,
-                          alignment: Alignment.center,
-                          child: Container(
-                            width: 18,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: Colors.white24,
-                              borderRadius: BorderRadius.circular(20),
+                  ? GestureDetector(
+                      onPanUpdate: moverOverlay,
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 34,
+                            alignment: Alignment.center,
+                            child: Container(
+                              width: 18,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: Colors.white24,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Ver Jogo',
-                            style: GoogleFonts.robotoMono(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: isCompact ? 12 : 13,
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Ver Jogo',
+                              style: GoogleFonts.robotoMono(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: isCompact ? 12 : 13,
+                              ),
                             ),
                           ),
-                        ),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          tooltip: 'Restaurar volante',
-                          onPressed: () =>
-                              setState(() => overlayMinimizado = false),
-                          icon: const Icon(Icons.add, color: Colors.white),
-                        ),
-                      ],
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'Restaurar volante',
+                            onPressed: () =>
+                                setState(() => overlayMinimizado = false),
+                            icon: const Icon(Icons.add, color: Colors.white),
+                          ),
+                        ],
+                      ),
                     )
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SizedBox(
-                          width: double.infinity,
-                          child: Column(
-                            children: [
-                              Center(
-                                child: Container(
-                                  width: 38,
-                                  height: 4,
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white30,
-                                    borderRadius: BorderRadius.circular(20),
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanUpdate: moverOverlay,
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: Column(
+                              children: [
+                                Center(
+                                  child: Container(
+                                    width: 38,
+                                    height: 4,
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white30,
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              Row(
-                                children: [
-                                  IconButton(
-                                    visualDensity: VisualDensity.compact,
-                                    onPressed: currentIndex > 0
-                                        ? () =>
-                                              setState(() => jogoAtualOverlay--)
-                                        : null,
-                                    icon: const Icon(
-                                      Icons.chevron_left,
-                                      color: Colors.white,
-                                    ),
-                                    tooltip: 'Jogo anterior',
-                                  ),
-                                  Expanded(
-                                    child: Text(
-                                      'JOGO ${(currentIndex + 1).toString().padLeft(2, '0')} / $totalJogos',
-                                      textAlign: TextAlign.center,
-                                      style: GoogleFonts.robotoMono(
+                                Row(
+                                  children: [
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      onPressed: currentIndex > 0
+                                          ? () => navegarParaIndice(
+                                              currentIndex - 1,
+                                            )
+                                          : null,
+                                      icon: const Icon(
+                                        Icons.chevron_left,
                                         color: Colors.white,
-                                        fontSize: isCompact ? 12 : 13,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.4,
+                                      ),
+                                      tooltip: 'Jogo anterior',
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        'JOGO ${(currentIndex + 1).toString().padLeft(2, '0')} / $totalJogos',
+                                        textAlign: TextAlign.center,
+                                        style: GoogleFonts.robotoMono(
+                                          color: Colors.white,
+                                          fontSize: isCompact ? 12 : 13,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.4,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  IconButton(
-                                    visualDensity: VisualDensity.compact,
-                                    onPressed: currentIndex < (totalJogos - 1)
-                                        ? () =>
-                                              setState(() => jogoAtualOverlay++)
-                                        : null,
-                                    icon: const Icon(
-                                      Icons.chevron_right,
-                                      color: Colors.white,
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      onPressed: currentIndex < (totalJogos - 1)
+                                          ? () => navegarParaIndice(
+                                              currentIndex + 1,
+                                            )
+                                          : null,
+                                      icon: const Icon(
+                                        Icons.chevron_right,
+                                        color: Colors.white,
+                                      ),
+                                      tooltip: 'Próximo jogo',
                                     ),
-                                    tooltip: 'Próximo jogo',
-                                  ),
-                                  IconButton(
-                                    visualDensity: VisualDensity.compact,
-                                    tooltip: 'Minimizar volante',
-                                    onPressed: () => setState(
-                                      () => overlayMinimizado = true,
+                                    IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      tooltip: 'Minimizar volante',
+                                      onPressed: () => setState(
+                                        () => overlayMinimizado = true,
+                                      ),
+                                      icon: const Icon(
+                                        Icons.remove,
+                                        color: Colors.white,
+                                      ),
                                     ),
-                                    icon: const Icon(
-                                      Icons.remove,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                         const SizedBox(height: 8),
                         SizedBox(
                           width: numberAreaWidth,
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: jogoAtual.map((numero) {
-                              return Container(
-                                width: bubbleSize,
-                                height: bubbleSize,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: const Color(
-                                    0xFF7B1FA2,
-                                  ).withOpacity(0.72),
-                                  border: Border.all(
-                                    color: kLotofacilPurpleGlow,
-                                    width: 1.2,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: kLotofacilPurpleGlow.withOpacity(
-                                        0.28,
+                          height: numbersHeight,
+                          child: PageView.builder(
+                            controller: pageController,
+                            itemCount: totalJogos,
+                            physics: const BouncingScrollPhysics(),
+                            onPageChanged: (idx) {
+                              if (idx != jogoAtualOverlay) {
+                                setState(() => jogoAtualOverlay = idx);
+                              }
+                            },
+                            itemBuilder: (_, pageIndex) {
+                              final numerosPagina = List<int>.from(
+                                widget.jogos![pageIndex]['jogo'] as List,
+                              );
+                              return Align(
+                                alignment: Alignment.topLeft,
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: numerosPagina.map((numero) {
+                                    return Container(
+                                      width: bubbleSize,
+                                      height: bubbleSize,
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: const Color(
+                                          0xFF7B1FA2,
+                                        ).withOpacity(0.72),
+                                        border: Border.all(
+                                          color: kLotofacilPurpleGlow,
+                                          width: 1.2,
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: kLotofacilPurpleGlow
+                                                .withOpacity(0.28),
+                                            blurRadius: 8,
+                                            spreadRadius: 0.4,
+                                          ),
+                                        ],
                                       ),
-                                      blurRadius: 8,
-                                      spreadRadius: 0.4,
-                                    ),
-                                  ],
-                                ),
-                                child: Text(
-                                  numero.toString().padLeft(2, '0'),
-                                  style: GoogleFonts.robotoMono(
-                                    color: Colors.white,
-                                    fontSize: isCompact ? 11 : 12,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                                      child: Text(
+                                        numero.toString().padLeft(2, '0'),
+                                        style: GoogleFonts.robotoMono(
+                                          color: Colors.white,
+                                          fontSize: isCompact ? 11 : 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
                                 ),
                               );
-                            }).toList(),
+                            },
                           ),
                         ),
                       ],
@@ -1488,23 +1543,23 @@ class ComplianceGate extends StatefulWidget {
 }
 
 class _ComplianceGateState extends State<ComplianceGate> {
-  late final Future<bool> _acceptedFuture;
+  late final Future<bool> _hideMessageFuture;
 
   @override
   void initState() {
     super.initState();
-    _acceptedFuture = _loadAccepted();
+    _hideMessageFuture = _loadHideMessagePreference();
   }
 
-  Future<bool> _loadAccepted() async {
+  Future<bool> _loadHideMessagePreference() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(kComplianceAcceptedKey) ?? false;
+    return prefs.getBool(kComplianceHideMessageKey) ?? false;
   }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<bool>(
-      future: _acceptedFuture,
+      future: _hideMessageFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Scaffold(
@@ -1517,8 +1572,8 @@ class _ComplianceGateState extends State<ComplianceGate> {
           );
         }
 
-        final accepted = snapshot.data ?? false;
-        if (accepted) {
+        final hideMessage = snapshot.data ?? false;
+        if (hideMessage) {
           return const HomePage();
         }
         return const CompliancePage();
@@ -1536,6 +1591,7 @@ class CompliancePage extends StatefulWidget {
 
 class _CompliancePageState extends State<CompliancePage> {
   bool _salvando = false;
+  bool _naoMostrarNovamente = false;
   static final Uri _jogoResponsavelUri = Uri.parse(
     'https://www.caixa.gov.br/loterias/Paginas/jogo-responsavel.aspx',
   );
@@ -1544,7 +1600,7 @@ class _CompliancePageState extends State<CompliancePage> {
     if (_salvando) return;
     setState(() => _salvando = true);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(kComplianceAcceptedKey, true);
+    await prefs.setBool(kComplianceHideMessageKey, _naoMostrarNovamente);
     if (!mounted) return;
     Navigator.of(
       context,
@@ -1639,7 +1695,7 @@ class _CompliancePageState extends State<CompliancePage> {
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'Proibição: Venda proibida para menores de 18 anos.',
+                      'Recomendação: uso responsável preferencial para maiores de 18 anos. A classificação indicativa oficial pode variar por país.',
                       style: TextStyle(
                         fontSize: 12.5,
                         color: Color(0xFFFCA5A5),
@@ -1678,6 +1734,27 @@ class _CompliancePageState extends State<CompliancePage> {
                       ),
                     ),
                     const SizedBox(height: 18),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: _naoMostrarNovamente,
+                      activeColor: kLotofacilPurple,
+                      checkColor: Colors.white,
+                      title: Text(
+                        'Não mostrar esta mensagem novamente',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: Colors.grey[300],
+                        ),
+                      ),
+                      onChanged: _salvando
+                          ? null
+                          : (value) {
+                              setState(
+                                () => _naoMostrarNovamente = value ?? false,
+                              );
+                            },
+                    ),
+                    const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton(
@@ -1696,7 +1773,7 @@ class _CompliancePageState extends State<CompliancePage> {
                                 ),
                               )
                             : const Text(
-                                'Eu tenho +18 anos e aceito os termos',
+                                'Li e aceito os termos de uso responsável',
                               ),
                       ),
                     ),
@@ -2399,12 +2476,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   void _mostrarVolanteFlutante(int jogoInicial) {
     int jogoAtual = jogoInicial;
+    final pageController = PageController(initialPage: jogoInicial);
+
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
-          final jogo = jogos[jogoAtual];
-          final Set<int> nums = Set.from(jogo.numeros);
           return Dialog(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
@@ -2433,84 +2510,122 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    _buildRatingBar(jogo.iaRating, compact: true),
-                    const SizedBox(height: 4),
-                    _buildTagChip(jogo.tagEstrategica),
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: const Color(0xFF4A148C),
-                          width: 2,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 6,
-                              mainAxisSpacing: 8,
-                              crossAxisSpacing: 8,
-                            ),
-                        itemCount: 25,
+                    Text(
+                      'Arraste para esquerda/direita para navegar',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 520,
+                      child: PageView.builder(
+                        controller: pageController,
+                        itemCount: jogos.length,
+                        onPageChanged: (idx) => setS(() => jogoAtual = idx),
                         itemBuilder: (_, idx) {
-                          final n = idx + 1;
-                          final sel = nums.contains(n);
-                          return Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: sel
-                                  ? const Color(0xFF4A148C)
-                                  : Colors.grey[200],
-                              border: Border.all(
-                                color: const Color(0xFF4A148C),
-                                width: 2,
+                          final jogoPagina = jogos[idx];
+                          final Set<int> numsPagina = Set.from(
+                            jogoPagina.numeros,
+                          );
+
+                          return Column(
+                            children: [
+                              _buildRatingBar(
+                                jogoPagina.iaRating,
+                                compact: true,
                               ),
-                            ),
-                            child: Center(
-                              child: Text(
-                                n.toString().padLeft(2, '0'),
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: sel ? Colors.white : Colors.grey[700],
-                                  fontSize: 14,
+                              const SizedBox(height: 4),
+                              _buildTagChip(jogoPagina.tagEstrategica),
+                              const SizedBox(height: 16),
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: const Color(0xFF4A148C),
+                                    width: 2,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: GridView.builder(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  gridDelegate:
+                                      const SliverGridDelegateWithFixedCrossAxisCount(
+                                        crossAxisCount: 6,
+                                        mainAxisSpacing: 8,
+                                        crossAxisSpacing: 8,
+                                      ),
+                                  itemCount: 25,
+                                  itemBuilder: (_, nIdx) {
+                                    final n = nIdx + 1;
+                                    final sel = numsPagina.contains(n);
+                                    return Container(
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: sel
+                                            ? const Color(0xFF4A148C)
+                                            : Colors.grey[200],
+                                        border: Border.all(
+                                          color: const Color(0xFF4A148C),
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          n.toString().padLeft(2, '0'),
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: sel
+                                                ? Colors.white
+                                                : Colors.grey[700],
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
-                            ),
+                              const SizedBox(height: 16),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: () => _copiarParaClipboard(
+                                        jogoPagina.numeros,
+                                      ),
+                                      icon: const Icon(
+                                        Icons.content_copy,
+                                        size: 18,
+                                      ),
+                                      label: const Text('Copiar'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.blue,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: () =>
+                                          _gerarPDFVolante(jogoPagina.numeros),
+                                      icon: const Icon(
+                                        Icons.picture_as_pdf,
+                                        size: 18,
+                                      ),
+                                      label: const Text('PDF'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           );
                         },
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () => _copiarParaClipboard(jogo.numeros),
-                            icon: const Icon(Icons.content_copy, size: 18),
-                            label: const Text('Copiar'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () => _gerarPDFVolante(jogo.numeros),
-                            icon: const Icon(Icons.picture_as_pdf, size: 18),
-                            label: const Text('PDF'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -2518,7 +2633,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         if (jogoAtual > 0)
                           Expanded(
                             child: ElevatedButton.icon(
-                              onPressed: () => setS(() => jogoAtual--),
+                              onPressed: () => pageController.previousPage(
+                                duration: const Duration(milliseconds: 250),
+                                curve: Curves.easeOutCubic,
+                              ),
                               icon: const Icon(Icons.arrow_back, size: 18),
                               label: const Text('Anterior'),
                               style: ElevatedButton.styleFrom(
@@ -2534,7 +2652,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           child: ElevatedButton.icon(
                             onPressed: () {
                               if (jogoAtual < jogos.length - 1) {
-                                setS(() => jogoAtual++);
+                                pageController.nextPage(
+                                  duration: const Duration(milliseconds: 250),
+                                  curve: Curves.easeOutCubic,
+                                );
                               } else {
                                 Navigator.of(ctx).pop();
                                 _showMsg('✅ Todos os jogos revisados!');
@@ -2566,7 +2687,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           );
         },
       ),
-    );
+    ).whenComplete(pageController.dispose);
   }
 
   // ── Widgets auxiliares ───────────────────────────────────────────────────────

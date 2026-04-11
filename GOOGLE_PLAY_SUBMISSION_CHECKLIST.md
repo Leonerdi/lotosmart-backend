@@ -15,7 +15,7 @@
 3. Preencha:
    - **Nome do app**: LotoSmart
    - **Categoria**: Casual / Simuladores / Loteria
-   - **Classificação indicativa**: +18 anos (importante para jogo de loteria)
+   - **Classificação indicativa**: definida pelo questionário IARC (pode variar por país)
 4. Aceite as políticas e clique **"Criar"**
 
 ---
@@ -35,14 +35,14 @@
   ⚠️ IMPORTANTE: Este aplicativo é apenas um simulador. Não garante prêmios 
   e não representa promessa de ganho. Jogue com responsabilidade.
   
-  Maiores de 18 anos.
+   Uso recomendado para maiores de 18 anos. A classificação indicativa oficial pode variar por região.
   ```
 - **Idioma**: Português (Brasil)
 
 ### 2.2 – Categoria e Classificação
 - **Categoria principal**: Casual
 - **Subcategoria**: Simuladores
-- **Classificação indicativa**: +18 anos (obrigatório para jogos de azar/loteria)
+- **Classificação indicativa**: definida pelo resultado do IARC em cada país/região
 
 ### 2.3 – Email de Contato
 - Use seu email Google (leonardo.fernandes.silva.lol@gmail.com)
@@ -93,7 +93,7 @@ https://leonerdi.github.io/lotosmart-backend/PRIVACY_POLICY.html
 - Preencha o questionnaire simples:
   - "Seu app coleta dados pessoais?" → **Não**
   - "Seu app contém publicidade?" → **Sim** (AdMob)
-  - "Seu app é destinado a crianças?" → **Não** (+18 apenas)
+   - "Seu app é destinado a crianças?" → **Não** (app não infantil)
 - Submit e aguarde a classificação (costuma ser em minutos)
 
 ### 6.2 – Proteção de Dados
@@ -140,7 +140,7 @@ Se quiser testar antes de subir para Production:
 
 - **Preço**: Gratuito (recomendado)
 - **Países**: Ativar vendas em "Todos os países"
-- **Idade mínima**: +18 anos
+- **Idade/restrições**: seguir classificação IARC por país (ex.: Livre no Brasil, 18+ em outras regiões)
 
 ---
 
@@ -156,7 +156,7 @@ Checklist antes de clicar "Submit":
 - [ ] Classificação IARC: Completada
 - [ ] AAB: Upload realizado
 - [ ] Release notes: Preenchidas
-- [ ] Idade: +18 anos
+- [ ] Classificação etária/IARC revisada por região
 
 ---
 
@@ -182,6 +182,6 @@ Se precisar de ajuda durante submissão:
 - ✅ AAB: Gerado e assinado
 - ✅ Política de Privacidade: Pronta (GitHub Pages)
 - ✅ Versão: 1.0.1+2
-- ⏳ GitHub Pages: Ativar (próximo passo)
+- ✅ GitHub Pages: Ativo
 - ⏳ Play Console: Submeter
 

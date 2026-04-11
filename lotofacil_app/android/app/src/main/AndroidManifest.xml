@@ -4,10 +4,13 @@
     <application
         android:label="LotoSmart"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/LaunchTheme">
+        <!-- AdMob: substituir pelo App ID real antes de ativar anúncios
+             Obter em: https://apps.admob.com -> Apps -> seu app -> App settings
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713"/>
+            android:value="ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX"/> -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
