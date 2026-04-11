@@ -9,7 +9,7 @@ import requests
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta, timezone
-from collections import Counter
+from collections import Counter, deque
 from itertools import combinations
 
 try:
@@ -92,6 +92,14 @@ _runtime_cache = {
     "response": {},
 }
 
+_metrics_lock = threading.Lock()
+_runtime_metrics = {
+    "started_at": time.time(),
+    "requests_total": 0,
+    "errors_total": 0,
+    "latency_ms_window": deque(maxlen=400),
+}
+
 if ZoneInfo is not None:
     BRT_TZ = ZoneInfo("America/Sao_Paulo")
 else:
@@ -133,6 +141,50 @@ def _get_cached_response(key: str, ttl_seconds: int):
 def _set_cached_response(key: str, data) -> None:
     with _cache_lock:
         _runtime_cache["response"][key] = {"ts": time.time(), "data": data}
+
+
+def _snapshot_metrics() -> dict:
+    with _metrics_lock:
+        latencies = list(_runtime_metrics["latency_ms_window"])
+        requests_total = int(_runtime_metrics["requests_total"])
+        errors_total = int(_runtime_metrics["errors_total"])
+
+    if latencies:
+        avg_ms = round(float(np.mean(latencies)), 2)
+        p95_ms = round(float(np.percentile(latencies, 95)), 2)
+    else:
+        avg_ms = 0.0
+        p95_ms = 0.0
+
+    error_rate = round((errors_total / requests_total) * 100, 2) if requests_total else 0.0
+    uptime_seconds = int(max(0, time.time() - _runtime_metrics["started_at"]))
+
+    return {
+        "uptime_segundos": uptime_seconds,
+        "requests_total": requests_total,
+        "errors_total": errors_total,
+        "error_rate_percentual": error_rate,
+        "latencia_media_ms": avg_ms,
+        "latencia_p95_ms": p95_ms,
+        "janela_amostras": len(latencies),
+    }
+
+
+@app.middleware("http")
+async def request_metrics_middleware(request, call_next):
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = int(response.status_code)
+        return response
+    finally:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        with _metrics_lock:
+            _runtime_metrics["requests_total"] += 1
+            _runtime_metrics["latency_ms_window"].append(elapsed_ms)
+            if status_code >= 500:
+                _runtime_metrics["errors_total"] += 1
 
 
 def _compute_sync_interval_seconds(now_brt: datetime) -> int:
@@ -459,6 +511,28 @@ def startup_sync():
 def admin_sync():
     """Força sincronização manual sem derrubar o serviço em caso de erro."""
     return ensure_database_synced(force=True)
+
+
+@app.get("/healthz")
+def healthz():
+    """Healthcheck leve para orquestrador e monitoramento."""
+    return {
+        "status": "ok",
+        "sync_status": _last_sync_result.get("status", "unknown"),
+        "csv_disponivel": os.path.exists(CSV_PATH),
+        "metrics": _snapshot_metrics(),
+    }
+
+
+@app.get("/ops/metrics")
+def ops_metrics():
+    """Métricas operacionais básicas para gatilhos de escala."""
+    return {
+        "status": "ok",
+        "timestamp": _now_brt().strftime("%Y-%m-%d %H:%M:%S"),
+        "sync": _last_sync_result,
+        "metrics": _snapshot_metrics(),
+    }
 
 
 def get_stats(hist):
