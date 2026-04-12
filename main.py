@@ -6,11 +6,19 @@ import logging
 import time
 import threading
 import requests
+import json
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta, timezone
 from collections import Counter, deque
 from itertools import combinations
+
+try:
+    import psycopg2
+    from psycopg2.extras import execute_values
+except Exception:  # pragma: no cover - fallback defensivo
+    psycopg2 = None
+    execute_values = None
 
 try:
     from zoneinfo import ZoneInfo
@@ -49,6 +57,9 @@ CFG = {
 
 CSV_PATH = "historico.csv"
 API_BASE = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
+JINA_PROXY_PREFIX = "https://r.jina.ai/http://"
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+DB_TABLE = os.getenv("DB_TABLE", "historico_lotofacil").strip() or "historico_lotofacil"
 CSV_COLUMNS = ["Concurso"] + [f"Bola{i}" for i in range(1, 16)]
 API_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -79,6 +90,7 @@ _api_session.headers.update(API_HEADERS)
 
 _sync_lock = threading.Lock()
 _cache_lock = threading.Lock()
+_storage_init_lock = threading.Lock()
 _last_sync_attempt_ts = 0.0
 _last_sync_result = {
     "status": "idle",
@@ -100,6 +112,10 @@ _runtime_metrics = {
     "latency_ms_window": deque(maxlen=400),
 }
 
+_historico_revision = 0
+_storage_initialized = False
+_background_sync_started = False
+
 if ZoneInfo is not None:
     BRT_TZ = ZoneInfo("America/Sao_Paulo")
 else:
@@ -118,7 +134,145 @@ def _invalidate_runtime_cache() -> None:
         _runtime_cache["response"].clear()
 
 
+def _db_enabled() -> bool:
+    return bool(DATABASE_URL and psycopg2 is not None and execute_values is not None)
+
+
+def _normalize_db_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return "postgresql://" + url[len("postgres://") :]
+    return url
+
+
+def _db_connect():
+    if not _db_enabled():
+        raise RuntimeError("Banco de dados indisponível")
+    db_url = _normalize_db_url(DATABASE_URL)
+    sslmode = os.getenv("PGSSLMODE", "require")
+    return psycopg2.connect(db_url, connect_timeout=10, sslmode=sslmode)
+
+
+def _ensure_db_schema() -> None:
+    cols = ",\n        ".join([f"bola{i} INTEGER NOT NULL" for i in range(1, 16)])
+    query = f"""
+    CREATE TABLE IF NOT EXISTS {DB_TABLE} (
+        concurso INTEGER PRIMARY KEY,
+        {cols},
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """
+    with _db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query)
+        conn.commit()
+
+
+def _load_historico_df_from_db() -> pd.DataFrame:
+    select_cols = ", ".join(["concurso"] + [f"bola{i}" for i in range(1, 16)])
+    query = f"SELECT {select_cols} FROM {DB_TABLE} ORDER BY concurso"
+    with _db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
+
+    if not rows:
+        return pd.DataFrame(columns=CSV_COLUMNS)
+
+    df = pd.DataFrame(rows, columns=["Concurso"] + [f"Bola{i}" for i in range(1, 16)])
+    df = _padronizar_colunas_historico(df)
+    for col in CSV_COLUMNS:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    return df
+
+
+def _persist_historico_df_to_db(df: pd.DataFrame) -> None:
+    if df.empty:
+        return
+
+    rows = []
+    for _, r in df.iterrows():
+        rows.append(tuple(int(r[c]) for c in CSV_COLUMNS))
+
+    insert_cols = ["concurso"] + [f"bola{i}" for i in range(1, 16)]
+    insert_cols_sql = ", ".join(insert_cols)
+    update_sql = ", ".join([f"bola{i}=EXCLUDED.bola{i}" for i in range(1, 16)]) + ", updated_at=NOW()"
+    query = f"""
+    INSERT INTO {DB_TABLE} ({insert_cols_sql})
+    VALUES %s
+    ON CONFLICT (concurso)
+    DO UPDATE SET {update_sql}
+    """
+
+    with _db_connect() as conn:
+        with conn.cursor() as cur:
+            execute_values(cur, query, rows)
+        conn.commit()
+
+
+def _load_historico_df_from_csv() -> pd.DataFrame:
+    if not os.path.exists(CSV_PATH):
+        return pd.DataFrame(columns=CSV_COLUMNS)
+
+    try:
+        df = pd.read_csv(CSV_PATH)
+        df = _padronizar_colunas_historico(df)
+
+        for col in CSV_COLUMNS:
+            if col not in df.columns:
+                df[col] = np.nan
+
+        df = df[CSV_COLUMNS]
+        df["Concurso"] = pd.to_numeric(df["Concurso"], errors="coerce")
+        df = df.dropna(subset=["Concurso"])
+        df["Concurso"] = df["Concurso"].astype(int)
+
+        for col in CSV_COLUMNS[1:]:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+        return df
+    except Exception as e:
+        logger.exception("Falha ao carregar historico.csv. Seguindo com base vazia. Erro: %s", e)
+        return pd.DataFrame(columns=CSV_COLUMNS)
+
+
+def _bootstrap_db_from_csv_if_empty() -> None:
+    if not _db_enabled():
+        return
+
+    with _db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(1) FROM {DB_TABLE}")
+            total = int(cur.fetchone()[0])
+
+    if total > 0:
+        return
+
+    df_csv = _load_historico_df_from_csv()
+    if not df_csv.empty:
+        _persist_historico_df_to_db(df_csv)
+        logger.info("Storage: DB inicializado a partir do CSV local (+%s concursos)", len(df_csv))
+
+
+def _init_storage_if_needed() -> None:
+    global _storage_initialized
+    if _storage_initialized:
+        return
+
+    with _storage_init_lock:
+        if _storage_initialized:
+            return
+
+        if _db_enabled():
+            _ensure_db_schema()
+            _bootstrap_db_from_csv_if_empty()
+
+        _storage_initialized = True
+
+
 def _historico_cache_key() -> tuple:
+    global _historico_revision
+    if _db_enabled():
+        return ("db", _historico_revision)
+
     if not os.path.exists(CSV_PATH):
         return ("missing", 0)
     stat = os.stat(CSV_PATH)
@@ -229,33 +383,62 @@ def _padronizar_colunas_historico(df: pd.DataFrame) -> pd.DataFrame:
 
 def _load_historico_df() -> pd.DataFrame:
     """Carrega o histórico em DataFrame padronizado, com fallback para vazio."""
-    if not os.path.exists(CSV_PATH):
-        return pd.DataFrame(columns=CSV_COLUMNS)
+    _init_storage_if_needed()
 
-    try:
-        df = pd.read_csv(CSV_PATH)
-        df = _padronizar_colunas_historico(df)
+    if _db_enabled():
+        try:
+            return _load_historico_df_from_db()
+        except Exception as e:
+            logger.exception("Falha ao carregar histórico no DB. Usando fallback CSV. Erro: %s", e)
 
-        # Se houver colunas extras, preservamos apenas o formato esperado.
-        for col in CSV_COLUMNS:
-            if col not in df.columns:
-                df[col] = np.nan
+    return _load_historico_df_from_csv()
 
-        df = df[CSV_COLUMNS]
-        df["Concurso"] = pd.to_numeric(df["Concurso"], errors="coerce")
-        df = df.dropna(subset=["Concurso"])
-        df["Concurso"] = df["Concurso"].astype(int)
-        return df
-    except Exception as e:
-        logger.exception("Falha ao carregar historico.csv. Seguindo com base vazia. Erro: %s", e)
-        return pd.DataFrame(columns=CSV_COLUMNS)
+
+def _persist_historico_df(df: pd.DataFrame) -> None:
+    global _historico_revision
+    _init_storage_if_needed()
+
+    if _db_enabled():
+        _persist_historico_df_to_db(df)
+    else:
+        df.to_csv(CSV_PATH, index=False)
+
+    _historico_revision += 1
+    _invalidate_runtime_cache()
 
 
 def _fetch_api_json(url: str) -> dict:
-    """Busca JSON com timeout e validação HTTP."""
-    response = _api_session.get(url, timeout=10)
-    response.raise_for_status()
-    return response.json()
+    """Busca JSON com timeout e validação HTTP, com fallback para espelho."""
+    try:
+        response = _api_session.get(url, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as direct_error:
+        status = None
+        if isinstance(direct_error, requests.HTTPError) and direct_error.response is not None:
+            status = int(direct_error.response.status_code)
+
+        # Somente tenta fallback em bloqueios/transientes comuns de infraestrutura.
+        if status not in (403, 429, 500, 502, 503, 504):
+            raise
+
+        proxy_url = url
+        if proxy_url.startswith("https://"):
+            proxy_url = JINA_PROXY_PREFIX + proxy_url[len("https://") :]
+        elif proxy_url.startswith("http://"):
+            proxy_url = "https://r.jina.ai/" + proxy_url
+
+        try:
+            proxy_resp = requests.get(proxy_url, timeout=15, headers={"User-Agent": API_HEADERS["User-Agent"]})
+            proxy_resp.raise_for_status()
+            body = proxy_resp.text
+            start = body.find("{")
+            end = body.rfind("}")
+            if start < 0 or end < 0 or end <= start:
+                raise ValueError("Resposta do fallback não contém JSON válido")
+            return json.loads(body[start : end + 1])
+        except Exception as fallback_error:
+            raise requests.HTTPError(f"{direct_error} | fallback: {fallback_error}")
 
 
 def _fetch_latest_payload() -> dict:
@@ -263,16 +446,60 @@ def _fetch_latest_payload() -> dict:
     errors = []
     for url in (API_BASE, f"{API_BASE}/ultimo"):
         try:
-            return _fetch_api_json(url)
+            payload = _fetch_api_json(url)
+            if _is_error_payload(payload):
+                errors.append(f"{url}: payload de erro remoto")
+                continue
+            return payload
         except requests.RequestException as e:
             errors.append(f"{url}: {e}")
     raise requests.HTTPError(" | ".join(errors))
 
 
+def _is_error_payload(payload: dict) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    error_keys = {"message", "exceptionMessage", "innerMessage", "stackTrace"}
+    return any(k in payload for k in error_keys) and "numero" not in payload
+
+
+def _extract_concurso_numero(payload: dict) -> int:
+    """Extrai o número do concurso de payloads com contratos variados."""
+    if not isinstance(payload, dict):
+        raise ValueError("Payload inválido: esperado dict")
+
+    candidate_keys = (
+        "numero",
+        "numeroConcurso",
+        "numero_concurso",
+        "numeroDoConcurso",
+        "concurso",
+    )
+
+    for key in candidate_keys:
+        value = payload.get(key)
+        if value is not None and str(value).strip() != "":
+            return int(value)
+
+    # Alguns contratos podem vir em estrutura aninhada.
+    resultado = payload.get("resultado")
+    if isinstance(resultado, dict):
+        for key in candidate_keys:
+            value = resultado.get(key)
+            if value is not None and str(value).strip() != "":
+                return int(value)
+
+    available = ", ".join(sorted(payload.keys()))
+    raise KeyError(f"Campo de número do concurso não encontrado. Chaves disponíveis: {available}")
+
+
 def _try_fetch_concurso_payload(concurso: int) -> dict | None:
     """Tenta buscar um concurso específico; retorna None quando não existe."""
     try:
-        return _fetch_api_json(f"{API_BASE}/{concurso}")
+        payload = _fetch_api_json(f"{API_BASE}/{concurso}")
+        if _is_error_payload(payload):
+            return None
+        return payload
     except requests.HTTPError as e:
         status = e.response.status_code if e.response is not None else None
         if status in (400, 404, 500, 502, 503, 504):
@@ -283,7 +510,7 @@ def _try_fetch_concurso_payload(concurso: int) -> dict | None:
 def _resolve_latest_concurso(ultimo_local: int) -> int:
     """Resolve o último concurso real com sondagem incremental para evitar cache defasado."""
     base_payload = _fetch_latest_payload()
-    latest = int(base_payload["numero"])
+    latest = _extract_concurso_numero(base_payload)
 
     # Algumas APIs podem devolver um "último" atrasado por cache. Sondamos alguns
     # concursos à frente para capturar publicação recém-disponível.
@@ -293,14 +520,14 @@ def _resolve_latest_concurso(ultimo_local: int) -> int:
         payload = _try_fetch_concurso_payload(probe + i)
         if payload is None:
             break
-        latest = int(payload["numero"])
+        latest = _extract_concurso_numero(payload)
 
     return latest
 
 
 def _row_from_api_payload(payload: dict) -> dict:
     """Converte payload da API externa no formato Concurso, Bola1..Bola15."""
-    numero = int(payload["numero"])
+    numero = _extract_concurso_numero(payload)
     dezenas = payload.get("listaDezenas") or payload.get("dezenasSorteadasOrdemSorteio") or []
 
     if len(dezenas) != 15:
@@ -315,7 +542,7 @@ def _row_from_api_payload(payload: dict) -> dict:
 
 def sync_database() -> dict:
     """
-    Sincroniza o historico.csv com os concursos mais recentes da API.
+    Sincroniza o histórico com os concursos mais recentes da API.
     Em caso de erro de rede/API, não quebra a aplicação (fallback resiliente).
     """
     try:
@@ -361,8 +588,7 @@ def sync_database() -> dict:
         for col in CSV_COLUMNS:
             df_total[col] = pd.to_numeric(df_total[col], errors="coerce").fillna(0).astype(int)
 
-        df_total.to_csv(CSV_PATH, index=False)
-        _invalidate_runtime_cache()
+        _persist_historico_df(df_total)
 
         logger.info(
             "Sync concluído: +%s concursos (local %s -> %s)",
@@ -436,7 +662,7 @@ def load_historico_blindado():
         if cached["key"] == cache_key and cached["data"] is not None:
             return cached["data"]
 
-    if not os.path.exists(CSV_PATH):
+    if not _db_enabled() and not os.path.exists(CSV_PATH):
         print(f"AVISO: {CSV_PATH} não encontrado. Usando dados temporários.")
         historico_tmp = [sorted(random.sample(range(1, 26), 15)) for _ in range(300)]
         with _cache_lock:
@@ -466,6 +692,32 @@ def load_historico_blindado():
         with _cache_lock:
             _runtime_cache["historico"] = {"key": cache_key, "data": historico_tmp}
         return historico_tmp
+
+
+def _background_sync_loop():
+    tick_seconds = max(30, int(os.getenv("SYNC_BACKGROUND_TICK_SECONDS", "60")))
+    logger.info("Background sync iniciado (tick=%ss)", tick_seconds)
+    while True:
+        try:
+            ensure_database_synced(force=False)
+        except Exception as e:
+            logger.exception("Background sync loop falhou: %s", e)
+        time.sleep(tick_seconds)
+
+
+def _start_background_sync_if_enabled():
+    global _background_sync_started
+    if _background_sync_started:
+        return
+
+    enabled = os.getenv("SYNC_BACKGROUND_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+    if not enabled:
+        logger.info("Background sync desabilitado por SYNC_BACKGROUND_ENABLED")
+        return
+
+    thread = threading.Thread(target=_background_sync_loop, name="sync-background", daemon=True)
+    thread.start()
+    _background_sync_started = True
 
 
 def _get_contexto_analitico(historico):
@@ -503,8 +755,10 @@ def _get_contexto_analitico(historico):
 @app.on_event("startup")
 def startup_sync():
     """Gatilho automático de atualização ao iniciar o servidor."""
+    _init_storage_if_needed()
     result = ensure_database_synced(force=True)
     logger.info("Startup sync result: %s", result)
+    _start_background_sync_if_enabled()
 
 
 @app.get("/admin/sync")
@@ -519,7 +773,9 @@ def healthz():
     return {
         "status": "ok",
         "sync_status": _last_sync_result.get("status", "unknown"),
+        "storage_backend": "postgres" if _db_enabled() else "csv",
         "csv_disponivel": os.path.exists(CSV_PATH),
+        "database_url_configurada": bool(DATABASE_URL),
         "metrics": _snapshot_metrics(),
     }
 
@@ -1050,7 +1306,7 @@ def _find_similar_cycle(historico, window_size=5):
         },
         "analise": {
             "distancia_euclidiana": round(melhor_distancia, 4),
-            "texto_autoridade": f"Padrão Fractal detectado: Similaridade de {round(similaridade_pct, 1)}% com o Ciclo dos Concursos {int(concurso_similar_start)}-{int(concurso_similar_end)}.",
+            "texto_autoridade": f"Padrão histórico similar identificado nos concursos {int(concurso_similar_start)}-{int(concurso_similar_end)} ({round(similaridade_pct, 1)}% de interseção) — usado para refinar a distribuição das apostas.",
         },
         "v_now": [round(x, 2) for x in v_now],
     }

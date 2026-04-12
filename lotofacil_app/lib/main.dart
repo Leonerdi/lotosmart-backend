@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Para clipboard
-// import 'package:google_mobile_ads/google_mobile_ads.dart'; // Só funciona em mobile
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
@@ -662,7 +661,7 @@ class ResultadosPage extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'ESTRATEGIA APLICADA',
+                              'ESTRATÉGIA APLICADA',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: Color(0xFF64748B),
@@ -1911,7 +1910,7 @@ class Diagnostico {
       probabilidadePadrao:
           (alerta['probabilidade_percentual'] as num?)?.toDouble() ?? 0,
       faixaDominante: alerta['intervalo'] ?? 'N/D',
-        ultimoConcurso:
+      ultimoConcurso:
           (inteligencia['ultimo_concurso'] as num?)?.toInt() ??
           (json['ultimo_concurso'] as num?)?.toInt() ??
           (json['concursos_analisados'] as num).toInt(),
@@ -2102,13 +2101,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   // Textos rotativos durante o carregamento
   static const _loadingTexts = [
-    'Analisando Janelas de Tempo...',
-    'Calculando Scores de Trincas...',
-    'Identificando Dezenas Quentes...',
-    'Avaliando Padrões de Atraso...',
-    'Otimizando Volantes...',
-    'Aplicando Filtros Estatísticos...',
-    'Finalizando IA Rating...',
+    'Analisando frequências históricas...',
+    'Calculando distribuição das trincas...',
+    'Identificando dezenas mais recorrentes...',
+    'Avaliando padrões de intervalo...',
+    'Otimizando distribuição dos volantes...',
+    'Aplicando filtros de consistência...',
+    'Calculando índice de qualidade da aposta...',
   ];
   int _loadingTextIndex = 0;
   late AnimationController _loadingAnimController;
@@ -2172,7 +2171,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String get _tickerText {
     final d = diagnostico;
     if (d == null) {
-      return 'INICIALIZANDO CENTRAL DE PROBABILIDADES  |  SINCRONIZANDO BASE HISTORICA  |  AGUARDANDO DIAGNOSTICO';
+      return 'PREPARANDO ANÁLISE PARA MELHORAR SUAS APOSTAS  |  SINCRONIZANDO BASE HISTÓRICA  |  CARREGANDO PARÂMETROS';
     }
 
     final atrasadas = d.atrasadasDetectadas.isEmpty
@@ -2184,11 +2183,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ? 'TRINCAS INDEFINIDAS'
         : d.melhoresTrincas.join(' / ');
     final payload = [
-      'MONITORANDO CONCURSO ${d.proximoConcurso}',
-      'DESVIO PADRAO DE SOMA: ${d.desvioPadraoSoma.toStringAsFixed(1)}',
-      'ATRASOS DETECTADOS: $atrasadas',
-      'MELHORES TRINCAS: $trincas',
-      'CORREDOR DOMINANTE: ${d.faixaDominante} (${d.probabilidadePadrao.toStringAsFixed(1)}%)',
+      'PRÓXIMO CONCURSO: ${d.proximoConcurso}',
+      'DESVIO PADRÃO DE SOMA: ${d.desvioPadraoSoma.toStringAsFixed(1)}',
+      'MAIOR INTERVALO: $atrasadas',
+      'TRINCAS RECORRENTES: $trincas',
+      'FAIXA DE SOMA DOMINANTE: ${d.faixaDominante} (${d.probabilidadePadrao.toStringAsFixed(1)}%)',
       d.alertaPadrao.toUpperCase(),
     ];
     return '${payload.join('  |  ')}  |  ${payload.join('  |  ')}';
@@ -2851,7 +2850,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'PULSO OPERACIONAL DO SISTEMA',
+                            'QUALIDADE DAS APOSTAS',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -2877,17 +2876,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         children: List.generate(3, (index) {
                           final item = [
                             (
-                              'PULSO OPERACIONAL DO SISTEMA',
+                              'CONSISTÊNCIA DO PADRÃO',
                               d.regimeLabel,
                               Icons.health_and_safety,
                             ),
                             (
-                              'CORREDOR DE CONVERGENCIA (SOMA)',
+                              'FAIXA DE SOMA RECORRENTE',
                               d.faixaSoma,
                               Icons.calculate,
                             ),
                             (
-                              'ARQUITETURA OTIMA DE PARIDADE',
+                              'PARIDADE MAIS FREQUENTE',
                               d.paridadeSugerida,
                               Icons.balance,
                             ),
@@ -2926,7 +2925,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
                     const SizedBox(height: 12),
                     Text(
-                      'DEZENAS QUENTES',
+                      'DEZENAS COM MAIOR FREQUÊNCIA RECENTE',
                       style: TextStyle(
                         fontSize: 10,
                         color: theme.textTheme.bodySmall?.color,
@@ -3033,7 +3032,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           ),
                         ),
                         child: Text(
-                          'A IA está analisando o histórico até o concurso ${d.ultimoConcurso} para otimizar estes parâmetros.',
+                          'Apostas otimizadas com base no histórico até o concurso ${d.ultimoConcurso}.',
                           style: TextStyle(
                             fontSize: 11,
                             color: theme.colorScheme.primary,
@@ -3044,7 +3043,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
                     const SizedBox(height: 12),
                     _buildSignalPanel(
-                      titulo: 'ATRASOS DETECTADOS',
+                      titulo: 'DEZENAS COM MAIOR INTERVALO',
                       conteudo: d.atrasadasDetectadas.isEmpty
                           ? 'N/D'
                           : d.atrasadasDetectadas
@@ -3053,14 +3052,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     ),
                     const SizedBox(height: 10),
                     _buildSignalPanel(
-                      titulo: 'MELHORES TRINCAS',
+                      titulo: 'TRINCAS MAIS RECORRENTES',
                       conteudo: d.melhoresTrincas.isEmpty
                           ? 'N/D'
                           : d.melhoresTrincas.join('   |   '),
                     ),
                     const SizedBox(height: 10),
                     _buildSignalPanel(
-                      titulo: 'ALERTA PROBABILISTICO',
+                      titulo: 'PADRÃO ESTATÍSTICO ATUAL',
                       conteudo: d.alertaPadrao,
                       subtitulo: d.similaridadeTexto,
                     ),
