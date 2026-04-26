@@ -232,6 +232,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.3.3"
+  google_mobile_ads:
+    dependency: "direct main"
+    description:
+      name: google_mobile_ads
+      sha256: "0d4a3744b5e8ed1b8be6a1b452d309f811688855a497c6113fc4400f922db603"
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.3.1"
   hooks:
     dependency: transitive
     description:
@@ -765,16 +773,8 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.1"
-  webview_cef:
-    dependency: "direct main"
-    description:
-      name: webview_cef
-      sha256: "2e660bf593dc1168beb7b765dd477a703e0b29968669f017e178c2c716f6437f"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.2"
   webview_flutter:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: webview_flutter
       sha256: a3da219916aba44947d3a5478b1927876a09781174b5a2b67fa5be0555154bf9
@@ -801,10 +801,10 @@ packages:
     dependency: transitive
     description:
       name: webview_flutter_wkwebview
-      sha256: d7219cfabc6f5fc2032e0fa980ec36d71f308a35a823395af1abc34d9a2ede83
+      sha256: a68868ac4828a5f012bf81e8bd25d879f3cec5bd5301575466caafbf9a320a65
       url: "https://pub.dev"
     source: hosted
-    version: "3.24.2"
+    version: "3.24.5"
   win32:
     dependency: transitive
     description:

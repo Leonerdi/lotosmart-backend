@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.gradle.api.GradleException
 
 plugins {
     id("com.android.application")
@@ -12,6 +13,10 @@ val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
+val adMobAppId =
+    (project.findProperty("ADMOB_APP_ID") as String?)
+        ?.takeIf { it.isNotBlank() }
+        ?: "ca-app-pub-3940256099942544~3347511713"
 
 android {
     namespace = "com.leonerdi.lotosmart"
@@ -33,6 +38,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["admobAppId"] = adMobAppId
     }
 
     signingConfigs {
@@ -48,11 +54,12 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (!keystorePropertiesFile.exists()) {
+                throw GradleException(
+                    "Release signing requires android/key.properties with production credentials.",
+                )
             }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

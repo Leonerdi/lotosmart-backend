@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.2+3
+version: 1.0.11+14
 
 environment:
   sdk: ^3.10.4
@@ -36,8 +36,6 @@ dependencies:
   cupertino_icons: ^1.0.8
   http: ^1.6.0
   url_launcher: ^6.2.0  # Para abrir URLs (site da Caixa)
-  webview_flutter: ^4.9.0  # WebView para mobile
-  webview_cef: ^0.2.2    # WebView para Windows/Desktop (CEF)
   pdf: ^3.10.0  # Para gerar PDFs do volante
   printing: ^5.11.0  # Para visualizar e imprimir PDFs
   fl_chart: ^0.68.0
@@ -47,6 +45,7 @@ dependencies:
   flutter_screenutil: ^5.9.3
   flutter_staggered_animations: ^1.1.1
   google_fonts: ^6.2.1
+  google_mobile_ads: ^5.3.1
 
 dev_dependencies:
   flutter_test:

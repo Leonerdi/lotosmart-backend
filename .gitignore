@@ -20,6 +20,24 @@ Thumbs.db
 # Logs
 *.log
 
+# Google Play publishing secrets
+play-console/*.json
+play-console/*.p12
+play-console/*.pem
+play-console/.env
+
 # Android signing secrets
 **/android/key.properties
 **/android/app/upload-keystore.jks
+
+# Release bundles
+*.aab
+*.apk
+
+# Setup/API guides
+GOOGLE_PLAY_API_SETUP.md
+.railwayignore
+
+# Play scripts (may contain secrets)
+scripts/
+play/

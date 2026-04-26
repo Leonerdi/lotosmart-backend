@@ -9,15 +9,12 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:sms_autofill/sms_autofill.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
-import 'package:webview_cef/webview_cef.dart' as cef;
 import 'package:printing/printing.dart';
+import 'package:lotofacil_app/ads/banner_ad_strip.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show HttpDate, Platform;
+import 'dart:io' show HttpDate;
 
 // Base única de produção (HTTPS). Para trocar sem editar código,
 // use: --dart-define=API_BASE_URL=https://seu-dominio.app
@@ -29,9 +26,83 @@ const String kProductionApiBaseUrl = String.fromEnvironment(
 const kLotofacilPurple = Color(0xFF7B1FA2);
 const kLotofacilPurpleGlow = Color(0xFFA855F7);
 const kSignalGreen = Color(0xFF16C784);
-const kComplianceHideMessageKey = 'compliance_hide_message_v2';
+const kComplianceHideMessageKey = 'compliance_hide_message_v3';
 const kCaixaBlue = Color(0xFF005CA9);
+const kAppLoteriasOrange = Color(0xFFF57C00);
 const kThemeModeStorageKey = 'isDarkMode';
+const String kLotofacilCaixaUrl =
+    'https://loterias.caixa.gov.br/wps/portal/loterias/landing/lotofacil';
+const MethodChannel _pipChannel = MethodChannel('lotosmart/pip');
+const String kLoteriasCaixaPackage = 'br.gov.caixa.loterias.apostas';
+
+Future<bool> abrirAppLoteriasOficial() async {
+  try {
+    return await _pipChannel.invokeMethod<bool>('openPackage', {
+          'packageName': kLoteriasCaixaPackage,
+        }) ??
+        false;
+  } catch (_) {}
+
+  return false;
+}
+
+Future<bool> abrirSiteOficialCaixa() async {
+  try {
+    final abriuNativo =
+        await _pipChannel.invokeMethod<bool>('openUrl', {
+          'url': kLotofacilCaixaUrl,
+        }) ??
+        false;
+    if (abriuNativo) return true;
+  } catch (_) {}
+
+  final uri = Uri.parse(kLotofacilCaixaUrl);
+  return launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
+Future<bool> abrirLotofacilEmCanalOficial() async {
+  final abriuApp = await abrirAppLoteriasOficial();
+  if (abriuApp) return true;
+  return abrirSiteOficialCaixa();
+}
+
+Future<bool> _isPipSupported() async {
+  try {
+    return await _pipChannel.invokeMethod<bool>('isPipSupported') ?? false;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> _enterPipMode({int numerator = 16, int denominator = 9}) async {
+  try {
+    return await _pipChannel.invokeMethod<bool>('enterPip', {
+          'numerator': numerator,
+          'denominator': denominator,
+        }) ??
+        false;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<void> _configurePipActions({
+  required bool canGoPrevious,
+  required bool canGoNext,
+}) async {
+  try {
+    await _pipChannel.invokeMethod('setPipActions', {
+      'canGoPrevious': canGoPrevious,
+      'canGoNext': canGoNext,
+    });
+  } catch (_) {}
+}
+
+Future<void> _clearPipActions() async {
+  try {
+    await _pipChannel.invokeMethod('clearPipActions');
+  } catch (_) {}
+}
 
 class ThemeService extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.dark;
@@ -74,7 +145,7 @@ ThemeData buildLightTheme() {
       foregroundColor: kLotofacilPurple,
       elevation: 1,
       surfaceTintColor: Colors.white,
-      titleTextStyle: GoogleFonts.robotoMono(
+      titleTextStyle: GoogleFonts.roboto(
         fontSize: 16,
         fontWeight: FontWeight.w700,
         color: kLotofacilPurple,
@@ -86,7 +157,7 @@ ThemeData buildLightTheme() {
       shadowColor: Colors.black12,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
-    textTheme: GoogleFonts.robotoMonoTextTheme(
+    textTheme: GoogleFonts.robotoTextTheme(
       const TextTheme(
         bodyLarge: TextStyle(color: lightText),
         bodyMedium: TextStyle(color: lightText),
@@ -149,22 +220,22 @@ ThemeData buildDarkTheme() {
     ),
     useMaterial3: true,
     scaffoldBackgroundColor: const Color(0xFF0A0E12),
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Color(0xFF0F1419),
-      foregroundColor: Color(0xFFE5E7EB),
+    appBarTheme: AppBarTheme(
+      backgroundColor: const Color(0xFF0F1419),
+      foregroundColor: const Color(0xFFE5E7EB),
       elevation: 0,
       centerTitle: false,
-      titleTextStyle: TextStyle(
+      titleTextStyle: GoogleFonts.roboto(
         fontSize: 16,
         fontWeight: FontWeight.w600,
-        color: Color(0xFFE5E7EB),
+        color: const Color(0xFFE5E7EB),
         letterSpacing: 0.5,
       ),
     ),
     cardTheme: CardThemeData(
       color: const Color(0xFF1A1F2E),
       elevation: 2,
-      shadowColor: Colors.black.withOpacity(0.5),
+      shadowColor: Colors.black.withValues(alpha: 0.5),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: const BorderSide(color: Color(0xFF2D3748), width: 1),
@@ -186,7 +257,9 @@ ThemeData buildDarkTheme() {
         borderSide: const BorderSide(color: Color(0xFF6366F1), width: 2),
       ),
       labelStyle: const TextStyle(color: Color(0xFFAEB9C7)),
-      hintStyle: TextStyle(color: const Color(0xFFAEB9C7).withOpacity(0.6)),
+      hintStyle: TextStyle(
+        color: const Color(0xFFAEB9C7).withValues(alpha: 0.6),
+      ),
     ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
       backgroundColor: const Color(0xFF6366F1),
@@ -209,7 +282,7 @@ ThemeData buildDarkTheme() {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     ),
-    textTheme: GoogleFonts.robotoMonoTextTheme(
+    textTheme: GoogleFonts.robotoTextTheme(
       const TextTheme(
         bodyMedium: TextStyle(color: Color(0xFFE5E7EB)),
         bodySmall: TextStyle(color: Color(0xFFAEB9C7)),
@@ -248,7 +321,7 @@ Widget buildResponsibleFooter(BoxConstraints c, {double bottom = 30}) {
       bottom,
     ),
     child: Text(
-      'A IA não garante prêmios. Jogue com responsabilidade.',
+      'LotoSmart é um software independente de análise estatística. Não realiza apostas, não recebe pagamentos e não possui vínculo com a CEF. Dados extraidos de: loterias.caixa.gov.br. Este app nao representa o governo. O uso dos dados é de inteira responsabilidade do usuário.',
       textAlign: TextAlign.center,
       style: TextStyle(
         fontSize: (c.maxWidth * 0.028).clamp(10.0, 12.0),
@@ -258,9 +331,153 @@ Widget buildResponsibleFooter(BoxConstraints c, {double bottom = 30}) {
   );
 }
 
+Future<void> mostrarAvisoAmbienteExterno(BuildContext context) async {
+  await showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Servico Externo de Terceiros'),
+      content: const Text(
+        'Voce sera redirecionado para uma fonte publica externa da Caixa. O LotoSmart e independente, sem vinculo com a Caixa, e nao coleta nem armazena suas credenciais.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Entendi'),
+        ),
+      ],
+    ),
+  );
+}
+
+class MarqueeText extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+  final double pixelsPerSecond;
+  final Duration pause;
+
+  const MarqueeText({
+    super.key,
+    required this.text,
+    required this.style,
+    this.pixelsPerSecond = 6, // Mais lento para leitura confortável
+    this.pause = const Duration(milliseconds: 900),
+  });
+
+  @override
+  State<MarqueeText> createState() => _MarqueeTextState();
+}
+
+class _MarqueeTextState extends State<MarqueeText>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  double _textWidth = 0;
+  double _availableWidth = 0;
+  // ignore: unused_field
+  static const double _gap = 0; // Mantém sem espaço visível
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _updateMetrics(BoxConstraints constraints) {
+    final textPainter = TextPainter(
+      text: TextSpan(text: widget.text, style: widget.style),
+      maxLines: 1,
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final nextTextWidth = textPainter.width;
+    final nextAvailableWidth = constraints.maxWidth;
+
+    if ((_textWidth - nextTextWidth).abs() < 0.5 &&
+        (_availableWidth - nextAvailableWidth).abs() < 0.5) {
+      return;
+    }
+
+    _textWidth = nextTextWidth;
+    _availableWidth = nextAvailableWidth;
+
+    // O ciclo deve cobrir 2x o texto para garantir continuidade perfeita
+    if (_textWidth <= _availableWidth) {
+      _controller.stop();
+      _controller.value = 0;
+      return;
+    }
+
+    final cycleWidth = _textWidth * 2;
+    final durationMs = (cycleWidth / widget.pixelsPerSecond * 1000).round();
+    _controller.duration = Duration(
+      milliseconds: durationMs.clamp(5000, 60000),
+    );
+    _controller.repeat();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _updateMetrics(constraints);
+        });
+
+        if (_textWidth <= 0 || _textWidth <= constraints.maxWidth) {
+          return Text(
+            widget.text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: widget.style,
+          );
+        }
+
+        return ClipRect(
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, child) {
+              // O deslocamento cobre 2x o texto para garantir ciclo perfeito
+              final offsetX = -_textWidth * 2 * _controller.value;
+              return Transform.translate(
+                offset: Offset(offsetX, 0),
+                child: child,
+              );
+            },
+            child: SizedBox(
+              width: _textWidth * 2,
+              child: Row(
+                children: [
+                  Text(
+                    widget.text,
+                    maxLines: 1,
+                    style: widget.style,
+                    textDirection: TextDirection.ltr,
+                  ),
+                  Text(
+                    widget.text,
+                    maxLines: 1,
+                    style: widget.style,
+                    textDirection: TextDirection.ltr,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await kThemeService.load();
+  await initializeMobileAds();
   runApp(const LotoApp());
 }
 
@@ -285,7 +502,7 @@ class ResultadosPage extends StatelessWidget {
     buffer.writeln('');
     for (int i = 0; i < jogos.length; i++) {
       final j = jogos[i];
-      buffer.writeln('Jogo ${i + 1} | IA Rating: ${j.iaRating}/1000');
+      buffer.writeln('Combinacao ${i + 1} | IA Rating: ${j.iaRating}/1000');
       buffer.writeln(j.numeros.join(', '));
       buffer.writeln('');
     }
@@ -295,7 +512,7 @@ class ResultadosPage extends StatelessWidget {
   void _compartilharUm(int i) {
     final jogo = jogos[i];
     Share.share(
-      'Jogo ${i + 1} | IA Rating: ${jogo.iaRating}/1000\n${jogo.numeros.join(', ')}',
+      'Combinacao ${i + 1} | IA Rating: ${jogo.iaRating}/1000\n${jogo.numeros.join(', ')}',
     );
   }
 
@@ -453,7 +670,7 @@ class ResultadosPage extends StatelessWidget {
               ),
               pw.SizedBox(height: 12),
               pw.Text(
-                'JOGO ${index + 1}  |  IA Rating: ${jogo.iaRating}/1000',
+                'COMBINACAO ${index + 1}  |  IA Rating: ${jogo.iaRating}/1000',
                 textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(
                   fontSize: 13,
@@ -481,7 +698,7 @@ class ResultadosPage extends StatelessWidget {
               ),
               pw.Spacer(),
               pw.Text(
-                'Uso pessoal | Nao garante premiacao | Confira sempre no canal oficial',
+                'Uso pessoal | Nao garante premiacao | Confira sempre em fonte publica da Caixa',
                 textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(
                   fontSize: 8,
@@ -514,12 +731,12 @@ class ResultadosPage extends StatelessWidget {
       final bytes = await pdf.save();
       await Printing.sharePdf(
         bytes: bytes,
-        filename: 'lotofacil_jogo_${i + 1}.pdf',
+        filename: 'lotofacil_combinacao_${i + 1}.pdf',
       );
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao gerar PDF do jogo: $e')),
+          SnackBar(content: Text('Erro ao gerar PDF da combinacao: $e')),
         );
       }
     }
@@ -544,27 +761,35 @@ class ResultadosPage extends StatelessWidget {
       }
 
       final bytes = await pdf.save();
-      await Printing.sharePdf(bytes: bytes, filename: 'lotofacil_10_jogos.pdf');
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'lotofacil_10_combinacoes.pdf',
+      );
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao gerar PDF dos jogos: $e')),
+          SnackBar(content: Text('Erro ao gerar PDF das combinacoes: $e')),
         );
       }
     }
   }
 
-  void _abrirSiteCaixa(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => WebViewScreen(
-          url:
-              'https://loterias.caixa.gov.br/wps/portal/loterias/landing/lotofacil',
-          title: 'Lotofácil - Caixa',
-          jogos: jogos
-              .map((j) => {'jogo': j.numeros, 'ia_rating': j.iaRating})
-              .toList(),
+  Future<void> _abrirSiteCaixa(BuildContext context) async {
+    if (context.mounted && jogos.isNotEmpty) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PipVolantePage(jogos: jogos, initialIndex: 0),
         ),
+      );
+      return;
+    }
+
+    final abriu = await abrirLotofacilEmCanalOficial();
+    if (!context.mounted || abriu) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Não foi possível abrir a fonte pública da Lotofácil.'),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -612,12 +837,12 @@ class ResultadosPage extends StatelessWidget {
         },
         child: FloatingActionButton.extended(
           onPressed: () => _abrirSiteCaixa(context),
-          backgroundColor: kCaixaBlue,
+          backgroundColor: kLotofacilPurple,
           foregroundColor: Colors.white,
           elevation: 10,
           icon: const Icon(Icons.account_balance_wallet, size: 22),
           label: const Text(
-            'Finalizar Apostas no Site Oficial',
+            'Abrir Fonte Publica da Caixa',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w700,
@@ -660,18 +885,18 @@ class ResultadosPage extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
+                            Text(
                               'ESTRATÉGIA APLICADA',
-                              style: TextStyle(
+                              style: GoogleFonts.roboto(
                                 fontSize: 11,
-                                color: Color(0xFF64748B),
+                                color: const Color(0xFF64748B),
                                 letterSpacing: 0.5,
                               ),
                             ),
                             const SizedBox(height: 6),
                             Text(
                               estrategia.toUpperCase(),
-                              style: const TextStyle(
+                              style: GoogleFonts.roboto(
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold,
                                 color: kLotofacilPurple,
@@ -680,12 +905,12 @@ class ResultadosPage extends StatelessWidget {
                             const SizedBox(height: 6),
                             Text(
                               diagnostico?.regimeDescricao ??
-                                  'Analise estatistica aplicada aos jogos gerados.',
+                                  'Analise estatística aplicada às combinações geradas.',
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: GoogleFonts.roboto(
                                 fontSize: 12,
-                                color: Color(0xFF64748B),
+                                color: const Color(0xFF64748B),
                               ),
                             ),
                           ],
@@ -722,7 +947,7 @@ class ResultadosPage extends StatelessWidget {
                   padding: EdgeInsets.fromLTRB(pad, 0, pad, 8),
                   child: Text(
                     'Este app não armazena suas senhas. O login é processado com total segurança pelos servidores da Caixa Econômica Federal.',
-                    style: TextStyle(
+                    style: GoogleFonts.roboto(
                       fontSize: (c.maxWidth * 0.027).clamp(10.0, 12.0),
                       color: theme.textTheme.bodySmall?.color,
                     ),
@@ -755,8 +980,8 @@ class ResultadosPage extends StatelessWidget {
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Text(
-                                    'JOGO ${i + 1}',
-                                    style: const TextStyle(
+                                    'COMBINAÇÃO ${i + 1}',
+                                    style: GoogleFonts.roboto(
                                       color: Colors.white,
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
@@ -770,9 +995,9 @@ class ResultadosPage extends StatelessWidget {
                                     jogo.tag,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
+                                    style: GoogleFonts.roboto(
                                       fontSize: 11,
-                                      color: Color(0xFF64748B),
+                                      color: const Color(0xFF64748B),
                                     ),
                                   ),
                                 ),
@@ -794,7 +1019,7 @@ class ResultadosPage extends StatelessWidget {
                                         color: isDark
                                             ? kLotofacilPurple
                                             : theme.colorScheme.primary
-                                                  .withOpacity(0.18),
+                                                  .withValues(alpha: 0.18),
                                         border: Border.all(
                                           color: isDark
                                               ? const Color(0xFFCE93D8)
@@ -806,7 +1031,7 @@ class ResultadosPage extends StatelessWidget {
                                         child: FittedBox(
                                           child: Text(
                                             n.toString().padLeft(2, '0'),
-                                            style: TextStyle(
+                                            style: GoogleFonts.roboto(
                                               fontWeight: FontWeight.bold,
                                               color: isDark
                                                   ? Colors.white
@@ -830,7 +1055,10 @@ class ResultadosPage extends StatelessWidget {
                                   FilledButton.tonalIcon(
                                     onPressed: () => _compartilharUm(i),
                                     icon: const Icon(Icons.share, size: 16),
-                                    label: const Text('Compartilhar Jogo'),
+                                    label: Text(
+                                      'Compartilhar Combinação',
+                                      style: GoogleFonts.roboto(),
+                                    ),
                                   ),
                                   FilledButton.tonalIcon(
                                     onPressed: () => _gerarPDFUm(context, i),
@@ -838,7 +1066,10 @@ class ResultadosPage extends StatelessWidget {
                                       Icons.picture_as_pdf,
                                       size: 16,
                                     ),
-                                    label: const Text('PDF Jogo'),
+                                    label: Text(
+                                      'PDF Combinação',
+                                      style: GoogleFonts.roboto(),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -859,655 +1090,6 @@ class ResultadosPage extends StatelessWidget {
   }
 }
 
-class WebViewScreen extends StatefulWidget {
-  final String url;
-  final String title;
-  final List<dynamic>? jogos;
-
-  const WebViewScreen({
-    required this.url,
-    required this.title,
-    this.jogos,
-    super.key,
-  });
-
-  @override
-  State<WebViewScreen> createState() => _WebViewScreenState();
-}
-
-class _WebViewScreenState extends State<WebViewScreen>
-    with CodeAutoFill, WidgetsBindingObserver {
-  // Mobile (Android/iOS)
-  WebViewController? _mobileController;
-  // User-Agent mobile usado pelo CEF (desktop) e como fallback no Android.
-  // No Android, o UA real do dispositivo é obtido dinamicamente em _initMobileWebView
-  // para que o site da Caixa reconheça o aparelho como Chrome legítimo.
-  static const String _mobileUserAgent =
-      'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36';
-  // Desktop/Windows (CEF)
-  late final cef.WebViewController _cefController;
-  int jogoAtualOverlay = 0;
-  bool overlayHovered = false;
-  bool overlayMinimizado = false;
-  Offset? overlayOffset;
-  PageController? _overlayPageController;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    if (widget.jogos != null && widget.jogos!.isNotEmpty) {
-      _overlayPageController = PageController(initialPage: jogoAtualOverlay);
-    }
-    if (Platform.isAndroid || Platform.isIOS) {
-      final PlatformWebViewControllerCreationParams params =
-          const PlatformWebViewControllerCreationParams();
-      final controller = WebViewController.fromPlatformCreationParams(params)
-        ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setNavigationDelegate(
-          NavigationDelegate(onPageFinished: _onMobilePageFinished),
-        );
-
-      // Em Android, o DOM Storage do WebView já vem habilitado por padrão.
-      // Mantemos JavaScript e recursos do browser ativos para integração com
-      // o gerenciador de senhas do sistema.
-      if (controller.platform is AndroidWebViewController) {
-        AndroidWebViewController.enableDebugging(false);
-        final androidCtrl = controller.platform as AndroidWebViewController;
-        androidCtrl.setMediaPlaybackRequiresUserGesture(false);
-      }
-
-      _mobileController = controller;
-      _initMobileWebView();
-      if (Platform.isAndroid) {
-        listenForCode();
-      }
-    } else {
-      // Desktop: usa CEF
-      _cefController = cef.WebviewManager().createWebView(
-        loading: const Center(child: CircularProgressIndicator()),
-      );
-      // Aguarda o primeiro frame para que o widget CEF tenha um view ID válido
-      // antes de chamar initialize(), evitando PlatformException.
-      WidgetsBinding.instance.addPostFrameCallback((_) => _initCef());
-    }
-  }
-
-  Future<void> _initCef() async {
-    try {
-      // Passa user agent mobile na primeira inicialização do processo CEF para
-      // que o servidor da Caixa entregue o layout responsivo mobile.
-      if (!cef.WebviewManager().value) {
-        await cef.WebviewManager().initialize(userAgent: _mobileUserAgent);
-      }
-      await _cefController.initialize(widget.url);
-      // Injeta viewport após cada carregamento de página para garantir que as
-      // media queries CSS respondam ao tamanho real do widget.
-      _cefController.setWebviewListener(
-        cef.WebviewEventsListener(
-          onLoadEnd: (controller, url) => _onCefPageFinished(controller),
-        ),
-      );
-      if (mounted) setState(() {});
-    } catch (_) {
-      // PlatformException de inicialização CEF é não-crítica;
-      // o webviewWidget já exibirá o indicador de carregamento.
-    }
-  }
-
-  static const String _responsiveViewportScript = '''
-    (function() {
-      var m = document.querySelector('meta[name="viewport"]');
-      if (!m) {
-        m = document.createElement('meta');
-        m.name = 'viewport';
-        document.head.appendChild(m);
-      }
-      m.content = 'width=device-width, initial-scale=0.92, maximum-scale=5.0, user-scalable=yes';
-
-      var root = document.documentElement;
-      var body = document.body;
-      if (root) {
-        root.style.overflowX = 'hidden';
-      }
-      if (body) {
-        body.style.overflowX = 'hidden';
-        body.style.minWidth = '0';
-      }
-    })();
-  ''';
-
-  void _onCefPageFinished(cef.WebViewController controller) {
-    controller.executeJavaScript(_responsiveViewportScript);
-  }
-
-  Future<void> _initMobileWebView() async {
-    final controller = _mobileController;
-    if (controller == null) return;
-
-    // Obtém o User-Agent nativo do sistema (modelo real do dispositivo,
-    // versão real do Android e do Chrome WebView instalado).
-    // Em seguida remove o token "; wv" que identifica o processo como
-    // WebView embarcado — sem ele, o site da Caixa trata a sessão como
-    // um Chrome regular e mantém o cookie de confiança do dispositivo,
-    // evitando o pedido de 2FA a cada acesso.
-    //
-    // Os cookies (incluindo HttpOnly) são persistidos automaticamente pelo
-    // CookieManager nativo do Android na pasta privada do app e restaurados
-    // na próxima abertura sem nenhum código extra.
-    final rawUA = (await controller.getUserAgent()) ?? '';
-    final String deviceUA = rawUA.isNotEmpty
-        ? rawUA.replaceAll('; wv', '')
-        : _mobileUserAgent;
-    await controller.setUserAgent(deviceUA);
-
-    await controller.loadRequest(Uri.parse(widget.url));
-  }
-
-  Future<void> _onMobilePageFinished(String _) async {
-    final controller = _mobileController;
-    if (controller != null) {
-      try {
-        await controller.runJavaScript(_responsiveViewportScript);
-        await _focusOtpField();
-      } catch (_) {
-        // Falha silenciosa para não interromper a navegação.
-      }
-    }
-    // Os cookies (incluindo HttpOnly, usados para confiança de dispositivo)
-    // são gerenciados automaticamente pelo CookieManager nativo do Android.
-    // Não usamos document.cookie via JS porque ele NÃO retorna cookies HttpOnly.
-  }
-
-  Future<void> _focusOtpField() async {
-    final controller = _mobileController;
-    if (controller == null) return;
-    const js = '''
-      (function() {
-        const selectors = [
-          'input[autocomplete="one-time-code"]',
-          'input[name*="otp" i]',
-          'input[name*="token" i]',
-          'input[name*="codigo" i]',
-          'input[id*="otp" i]',
-          'input[id*="token" i]',
-          'input[id*="codigo" i]',
-          'input[type="tel"]',
-          'input[type="number"]'
-        ];
-        let target = null;
-        for (const s of selectors) {
-          target = document.querySelector(s);
-          if (target) break;
-        }
-        if (!target) return false;
-        try {
-          target.setAttribute('autocomplete', 'one-time-code');
-          target.setAttribute('inputmode', 'numeric');
-          target.setAttribute('autocorrect', 'off');
-          target.setAttribute('autocapitalize', 'off');
-          target.setAttribute('spellcheck', 'false');
-        } catch (e) {}
-        target.focus();
-        if (typeof target.click === 'function') {
-          target.click();
-        }
-        return true;
-      })();
-    ''';
-    try {
-      await controller.runJavaScript(js);
-    } catch (_) {
-      // Falha silenciosa para manter a navegação estável.
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      Future<void>.delayed(const Duration(milliseconds: 300), _focusOtpField);
-    }
-  }
-
-  @override
-  void codeUpdated() {
-    final current = code;
-    if (current == null || current.trim().isEmpty) return;
-    _injectOtpCode(current);
-  }
-
-  Future<void> _injectOtpCode(String incoming) async {
-    final controller = _mobileController;
-    if (controller == null) return;
-
-    final otp = _extractOtp(incoming);
-    if (otp == null) return;
-
-    final escaped = otp.replaceAll("'", "\\'");
-    final js =
-        '''
-      (function(code) {
-        const selectors = [
-          'input[autocomplete="one-time-code"]',
-          'input[name*="otp" i]',
-          'input[name*="token" i]',
-          'input[name*="codigo" i]',
-          'input[id*="otp" i]',
-          'input[id*="token" i]',
-          'input[id*="codigo" i]',
-          'input[type="tel"]',
-          'input[type="number"]'
-        ];
-        let target = null;
-        for (const s of selectors) {
-          target = document.querySelector(s);
-          if (target) break;
-        }
-        if (!target) {
-          const inputs = Array.from(document.querySelectorAll('input'));
-          target = inputs.find((el) => {
-            const text = ((el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '')).toLowerCase();
-            return text.includes('codigo') || text.includes('token') || text.includes('otp') || text.includes('sms');
-          });
-        }
-        if (!target) return false;
-        target.focus();
-        target.value = code;
-        target.dispatchEvent(new Event('input', { bubbles: true }));
-        target.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      })('$escaped');
-    ''';
-
-    try {
-      await controller.runJavaScript(js);
-    } catch (_) {
-      // Falha silenciosa para manter fluxo de navegação estável.
-    }
-  }
-
-  String? _extractOtp(String source) {
-    final match = RegExp(r'\b\d{4,8}\b').firstMatch(source);
-    return match?.group(0);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _overlayPageController?.dispose();
-    if (Platform.isAndroid) {
-      cancel();
-    }
-    if (!Platform.isAndroid && !Platform.isIOS) {
-      _cefController.dispose();
-      // NÃO chamar WebviewManager().quit() aqui — encerraria o processo CEF
-      // inteiro e derrubaria o app ao voltar da tela
-    }
-    super.dispose();
-  }
-
-  Widget _buildApostaOverlay(Size viewport) {
-    if (widget.jogos == null || widget.jogos!.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    final totalJogos = widget.jogos!.length;
-    final currentIndex = jogoAtualOverlay.clamp(0, totalJogos - 1);
-    final pageController = _overlayPageController ??= PageController(
-      initialPage: currentIndex,
-    );
-    final jogoAtual = List<int>.from(
-      widget.jogos![currentIndex]['jogo'] as List,
-    );
-
-    final bool isCompact = viewport.width < 430;
-    final double margin = isCompact ? 10 : 16;
-    final double contentPadding = isCompact ? 12 : 14;
-    final double fullOverlayWidth = isCompact
-        ? (viewport.width * 0.92).clamp(280.0, 360.0)
-        : 360.0;
-    final double miniOverlayWidth = isCompact ? 170 : 188;
-    final double miniOverlayHeight = 52;
-    final double bubbleSize = isCompact ? 30 : 32;
-
-    final double numberAreaWidth = fullOverlayWidth - (contentPadding * 2);
-    final int numbersPerRow = ((numberAreaWidth + 8) / (bubbleSize + 8))
-        .floor()
-        .clamp(1, 15);
-    final int rows = (jogoAtual.length / numbersPerRow).ceil();
-    final double numbersHeight = (rows * bubbleSize) + ((rows - 1) * 8);
-    final double fullOverlayHeight =
-        contentPadding + 62 + 8 + numbersHeight + contentPadding;
-
-    final Size overlaySize = overlayMinimizado
-        ? Size(miniOverlayWidth, miniOverlayHeight)
-        : Size(fullOverlayWidth, fullOverlayHeight);
-
-    final double maxX = (viewport.width - overlaySize.width - margin).clamp(
-      margin,
-      double.infinity,
-    );
-    final double maxY = (viewport.height - overlaySize.height - margin).clamp(
-      margin,
-      double.infinity,
-    );
-
-    final double initialY = (margin + 24).clamp(margin, maxY);
-    final Offset posicaoInicial = Offset(maxX, initialY);
-    final Offset posicaoAtual = overlayOffset ?? posicaoInicial;
-    final Offset posicaoAjustada = Offset(
-      posicaoAtual.dx.clamp(margin, maxX),
-      posicaoAtual.dy.clamp(margin, maxY),
-    );
-
-    void moverOverlay(DragUpdateDetails details) {
-      setState(() {
-        final base = overlayOffset ?? posicaoAjustada;
-        overlayOffset = Offset(
-          (base.dx + details.delta.dx).clamp(margin, maxX),
-          (base.dy + details.delta.dy).clamp(margin, maxY),
-        );
-      });
-    }
-
-    void navegarParaIndice(int novoIndice) {
-      if (novoIndice < 0 || novoIndice >= totalJogos) return;
-      if (novoIndice == jogoAtualOverlay) return;
-      setState(() => jogoAtualOverlay = novoIndice);
-      if (pageController.hasClients) {
-        pageController.animateToPage(
-          novoIndice,
-          duration: const Duration(milliseconds: 280),
-          curve: Curves.easeOutCubic,
-        );
-      }
-    }
-
-    if (overlayOffset == null || overlayOffset != posicaoAjustada) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        setState(() => overlayOffset = posicaoAjustada);
-      });
-    }
-
-    return Positioned(
-      left: posicaoAjustada.dx,
-      top: posicaoAjustada.dy,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => overlayHovered = true),
-        onExit: (_) => setState(() => overlayHovered = false),
-        child: AnimatedOpacity(
-          opacity: overlayHovered ? 1.0 : 0.94,
-          duration: const Duration(milliseconds: 180),
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              width: overlayMinimizado ? miniOverlayWidth : fullOverlayWidth,
-              height: overlayMinimizado ? miniOverlayHeight : fullOverlayHeight,
-              decoration: BoxDecoration(
-                color:
-                    (isDark ? const Color(0xFF1E293B) : const Color(0xFF334155))
-                        .withOpacity(overlayHovered ? 0.92 : 0.88),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: theme.colorScheme.primary.withOpacity(0.78),
-                  width: 1.2,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.55),
-                    blurRadius: 24,
-                    spreadRadius: 1,
-                    offset: const Offset(0, 12),
-                  ),
-                ],
-              ),
-              padding: EdgeInsets.all(contentPadding),
-              child: overlayMinimizado
-                  ? GestureDetector(
-                      onPanUpdate: moverOverlay,
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 34,
-                            alignment: Alignment.center,
-                            child: Container(
-                              width: 18,
-                              height: 4,
-                              decoration: BoxDecoration(
-                                color: Colors.white24,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Ver Jogo',
-                              style: GoogleFonts.robotoMono(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                                fontSize: isCompact ? 12 : 13,
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            tooltip: 'Restaurar volante',
-                            onPressed: () =>
-                                setState(() => overlayMinimizado = false),
-                            icon: const Icon(Icons.add, color: Colors.white),
-                          ),
-                        ],
-                      ),
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onPanUpdate: moverOverlay,
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: Column(
-                              children: [
-                                Center(
-                                  child: Container(
-                                    width: 38,
-                                    height: 4,
-                                    margin: const EdgeInsets.only(bottom: 8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white30,
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                  ),
-                                ),
-                                Row(
-                                  children: [
-                                    IconButton(
-                                      visualDensity: VisualDensity.compact,
-                                      onPressed: currentIndex > 0
-                                          ? () => navegarParaIndice(
-                                              currentIndex - 1,
-                                            )
-                                          : null,
-                                      icon: const Icon(
-                                        Icons.chevron_left,
-                                        color: Colors.white,
-                                      ),
-                                      tooltip: 'Jogo anterior',
-                                    ),
-                                    Expanded(
-                                      child: Text(
-                                        'JOGO ${(currentIndex + 1).toString().padLeft(2, '0')} / $totalJogos',
-                                        textAlign: TextAlign.center,
-                                        style: GoogleFonts.robotoMono(
-                                          color: Colors.white,
-                                          fontSize: isCompact ? 12 : 13,
-                                          fontWeight: FontWeight.w700,
-                                          letterSpacing: 0.4,
-                                        ),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      visualDensity: VisualDensity.compact,
-                                      onPressed: currentIndex < (totalJogos - 1)
-                                          ? () => navegarParaIndice(
-                                              currentIndex + 1,
-                                            )
-                                          : null,
-                                      icon: const Icon(
-                                        Icons.chevron_right,
-                                        color: Colors.white,
-                                      ),
-                                      tooltip: 'Próximo jogo',
-                                    ),
-                                    IconButton(
-                                      visualDensity: VisualDensity.compact,
-                                      tooltip: 'Minimizar volante',
-                                      onPressed: () => setState(
-                                        () => overlayMinimizado = true,
-                                      ),
-                                      icon: const Icon(
-                                        Icons.remove,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: numberAreaWidth,
-                          height: numbersHeight,
-                          child: PageView.builder(
-                            controller: pageController,
-                            itemCount: totalJogos,
-                            physics: const BouncingScrollPhysics(),
-                            onPageChanged: (idx) {
-                              if (idx != jogoAtualOverlay) {
-                                setState(() => jogoAtualOverlay = idx);
-                              }
-                            },
-                            itemBuilder: (_, pageIndex) {
-                              final numerosPagina = List<int>.from(
-                                widget.jogos![pageIndex]['jogo'] as List,
-                              );
-                              return Align(
-                                alignment: Alignment.topLeft,
-                                child: Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: numerosPagina.map((numero) {
-                                    return Container(
-                                      width: bubbleSize,
-                                      height: bubbleSize,
-                                      alignment: Alignment.center,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: const Color(
-                                          0xFF7B1FA2,
-                                        ).withOpacity(0.72),
-                                        border: Border.all(
-                                          color: kLotofacilPurpleGlow,
-                                          width: 1.2,
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: kLotofacilPurpleGlow
-                                                .withOpacity(0.28),
-                                            blurRadius: 8,
-                                            spreadRadius: 0.4,
-                                          ),
-                                        ],
-                                      ),
-                                      child: Text(
-                                        numero.toString().padLeft(2, '0'),
-                                        style: GoogleFonts.robotoMono(
-                                          color: Colors.white,
-                                          fontSize: isCompact ? 11 : 12,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    );
-                                  }).toList(),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Windows/Desktop: navegador CEF embutido com overlay das apostas
-    if (!Platform.isAndroid && !Platform.isIOS) {
-      return Scaffold(
-        appBar: AppBar(
-          title: Text(widget.title),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ),
-        body: LayoutBuilder(
-          builder: (context, constraints) {
-            final viewport = Size(constraints.maxWidth, constraints.maxHeight);
-            return Stack(
-              children: [
-                ValueListenableBuilder<bool>(
-                  valueListenable: _cefController,
-                  builder: (context, ready, _) {
-                    return ready
-                        ? SizedBox.expand(child: _cefController.webviewWidget)
-                        : const Center(child: CircularProgressIndicator());
-                  },
-                ),
-                _buildApostaOverlay(viewport),
-              ],
-            );
-          },
-        ),
-      );
-    }
-
-    // Mobile: WebView nativo
-    final Widget browser = _mobileController != null
-        ? WebViewWidget(controller: _mobileController!)
-        : const Center(child: CircularProgressIndicator());
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final viewport = Size(constraints.maxWidth, constraints.maxHeight);
-          return Stack(children: [browser, _buildApostaOverlay(viewport)]);
-        },
-      ),
-    );
-  }
-}
-
 class LotoApp extends StatelessWidget {
   const LotoApp({super.key});
 
@@ -1517,7 +1099,7 @@ class LotoApp extends StatelessWidget {
       designSize: const Size(390, 844),
       minTextAdapt: true,
       splitScreenMode: true,
-      builder: (_, __) => ListenableBuilder(
+      builder: (_, _) => ListenableBuilder(
         listenable: kThemeService,
         builder: (context, _) {
           return MaterialApp(
@@ -1591,219 +1173,626 @@ class CompliancePage extends StatefulWidget {
 class _CompliancePageState extends State<CompliancePage> {
   bool _salvando = false;
   bool _naoMostrarNovamente = false;
+  bool _confirmouMaioridade = false;
+  static final Uri _lotofacilFontePublicaUri = Uri.parse(kLotofacilCaixaUrl);
   static final Uri _jogoResponsavelUri = Uri.parse(
     'https://www.caixa.gov.br/jogo-responsavel/Paginas/default.aspx',
   );
+
+  Future<void> _abrirFontePublica(Uri uri) async {
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Nao foi possivel abrir a fonte publica no momento.'),
+      ),
+    );
+  }
+
+  Future<void> _abrirJogoResponsavel() async {
+    await _abrirFontePublica(_jogoResponsavelUri);
+  }
+
+  Future<void> _abrirLotofacilFontePublica() async {
+    await _abrirFontePublica(_lotofacilFontePublicaUri);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF181C2A),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF181C2A),
+        elevation: 0,
+        title: Text(
+          'Termos de Responsabilidade',
+          style: GoogleFonts.roboto(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: kLotofacilPurple.withValues(alpha: 0.22),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Center(
+                      child: Text(
+                        '+18',
+                        style: TextStyle(
+                          color: kLotofacilPurpleGlow,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Uso Consciente e Responsabilidade',
+                      style: GoogleFonts.roboto(
+                        fontSize: 16,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Este aplicativo é uma ferramenta de estudo estatístico e análise de tendências. Não realizamos registros, não temos vínculo com a Caixa Econômica Federal e não garantimos convergência de resultados. Utilize os dados com responsabilidade.',
+                style: GoogleFonts.roboto(
+                  fontSize: 13,
+                  color: Colors.white,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Identidade do Produto: Software de Pesquisa e Estudo Estatístico.',
+                style: GoogleFonts.roboto(
+                  fontSize: 12.5,
+                  color: Colors.white,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Limitação de Responsabilidade: O uso desta ferramenta é de inteira responsabilidade do usuário. As sugestões de combinação são baseadas em cálculos matemáticos sobre dados históricos.',
+                style: GoogleFonts.roboto(
+                  fontSize: 12.5,
+                  color: Colors.white,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Recomendação: uso responsável preferencial para maiores de 18 anos. A classificação indicativa pode variar por país.',
+                style: GoogleFonts.roboto(
+                  fontSize: 12.5,
+                  color: const Color(0xFFFCA5A5),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0B1220),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF334155)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'O uso deve ser estritamente informativo. Para orientações públicas, consulte a fonte de uso responsável da Caixa.',
+                      style: GoogleFonts.roboto(
+                        fontSize: 12.5,
+                        color: Colors.white,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: _abrirJogoResponsavel,
+                      icon: const Icon(Icons.open_in_new, size: 16),
+                      label: const Text(
+                        'Abrir fonte publica de uso responsavel da Caixa',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF111827),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF374151)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Fonte oficial de dados: https://loterias.caixa.gov.br',
+                      style: GoogleFonts.roboto(
+                        fontSize: 12,
+                        color: const Color(0xFF93C5FD),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => _abrirFontePublica(
+                        Uri.parse('https://loterias.caixa.gov.br'),
+                      ),
+                      icon: const Icon(Icons.open_in_new, size: 16),
+                      label: const Text('Abrir fonte oficial de dados'),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Fontes governamentais publicas (Caixa):',
+                      style: GoogleFonts.roboto(
+                        fontSize: 12.5,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Lotofacil (fonte publica):',
+                      style: GoogleFonts.roboto(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    SelectableText(
+                      kLotofacilCaixaUrl,
+                      style: GoogleFonts.roboto(
+                        fontSize: 12,
+                        color: const Color(0xFF93C5FD),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _abrirLotofacilFontePublica,
+                      icon: const Icon(Icons.open_in_new, size: 16),
+                      label: const Text('Abrir fonte publica da Lotofacil'),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Jogo responsavel (fonte publica):',
+                      style: GoogleFonts.roboto(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    SelectableText(
+                      _jogoResponsavelUri.toString(),
+                      style: GoogleFonts.roboto(
+                        fontSize: 12,
+                        color: const Color(0xFF93C5FD),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _abrirJogoResponsavel,
+                      icon: const Icon(Icons.open_in_new, size: 16),
+                      label: const Text(
+                        'Abrir fonte publica de uso responsavel',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _confirmouMaioridade,
+                activeColor: kLotofacilPurple,
+                checkColor: Colors.white,
+                title: Text(
+                  'Confirmo que sou maior de 18 anos e compreendo que não há garantia de resultados.',
+                  style: GoogleFonts.roboto(
+                    fontSize: 12.5,
+                    color: Colors.white,
+                  ),
+                ),
+                onChanged: _salvando
+                    ? null
+                    : (value) {
+                        setState(() => _confirmouMaioridade = value ?? false);
+                      },
+              ),
+              const SizedBox(height: 4),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _naoMostrarNovamente,
+                activeColor: kLotofacilPurple,
+                checkColor: Colors.white,
+                title: Text(
+                  'Não mostrar esta mensagem novamente',
+                  style: GoogleFonts.roboto(
+                    fontSize: 12.5,
+                    color: Colors.white,
+                  ),
+                ),
+                onChanged: _salvando
+                    ? null
+                    : (value) {
+                        setState(() => _naoMostrarNovamente = value ?? false);
+                      },
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _salvando || !_confirmouMaioridade
+                      ? null
+                      : _aceitarTermos,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: kLotofacilPurple,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: _salvando
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text(
+                          'Confirmo +18 e aceito os termos de uso responsável',
+                        ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  child: const Text('Voltar'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () => SystemNavigator.pop(),
+                  child: const Text('Sair'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Future<void> _aceitarTermos() async {
     if (_salvando) return;
     setState(() => _salvando = true);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kComplianceHideMessageKey, _naoMostrarNovamente);
-    if (!mounted) return;
-    Navigator.of(
-      context,
-    ).pushReplacement(MaterialPageRoute(builder: (_) => const HomePage()));
+    if (mounted) {
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => const HomePage()));
+    }
+  }
+}
+
+class PipVolantePage extends StatefulWidget {
+  final List<JogoIA> jogos;
+  final int initialIndex;
+
+  const PipVolantePage({super.key, required this.jogos, this.initialIndex = 0});
+
+  @override
+  State<PipVolantePage> createState() => _PipVolantePageState();
+}
+
+class _PipVolantePageState extends State<PipVolantePage>
+    with WidgetsBindingObserver {
+  late final PageController _controller;
+  late int _current;
+  bool _launching = false;
+  bool _pipFocusMode = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _current = widget.initialIndex.clamp(0, widget.jogos.length - 1);
+    _controller = PageController(initialPage: _current);
+
+    _pipChannel.setMethodCallHandler((call) async {
+      if (!mounted) return;
+      switch (call.method) {
+        case 'pipPrevious':
+          if (_current > 0) {
+            await _controller.previousPage(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+            );
+          }
+          break;
+        case 'pipNext':
+          if (_current < (widget.jogos.length - 1)) {
+            await _controller.nextPage(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+            );
+          }
+          break;
+      }
+    });
   }
 
-  Future<void> _abrirJogoResponsavel() async {
-    try {
-      final abriu = await launchUrl(
-        _jogoResponsavelUri,
-        mode: LaunchMode.externalApplication,
-      );
-      if (abriu) {
-        return;
-      }
-    } catch (_) {
-      // Exibe aviso amigável abaixo.
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pipChannel.setMethodCallHandler(null);
+    _clearPipActions();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Quando o app vai para background sem PIP ativo, volta à tela normal
+    // para não segurar recursos. Se PIP estiver ativo, é o comportamento esperado.
+    if (state == AppLifecycleState.paused && !_pipFocusMode) {
+      if (mounted) Navigator.of(context).maybePop();
+    }
+  }
+
+  Future<void> _entrarEmPipSomente() async {
+    final suportaPip = await _isPipSupported();
+    if (!suportaPip) {
+      _pipFocusMode = false;
+      if (mounted) setState(() {});
+      return;
     }
 
+    await _configurePipActions(
+      canGoPrevious: _current > 0,
+      canGoNext: _current < (widget.jogos.length - 1),
+    );
+    _pipFocusMode = true;
+    if (mounted) setState(() {});
+    await _enterPipMode(numerator: 3, denominator: 5);
+  }
+
+  Future<void> _abrirDestinoComPip({required bool abrirApp}) async {
+    if (_launching) return;
+    setState(() => _launching = true);
+
+    await mostrarAvisoAmbienteExterno(context);
+    if (!mounted) return;
+
+    await _entrarEmPipSomente();
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    final abriu = abrirApp
+        ? await abrirAppLoteriasOficial()
+        : await abrirSiteOficialCaixa();
+
+    if (!mounted) return;
+    setState(() => _launching = false);
+
+    if (!abriu) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            abrirApp
+                ? 'Não foi possível abrir o App Loterias da Caixa neste dispositivo.'
+                : 'Não foi possível abrir a fonte pública da Caixa neste dispositivo.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _copiarJogoAtual() async {
+    final texto = widget.jogos[_current].numeros.join(', ');
+    await Clipboard.setData(ClipboardData(text: texto));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Nao foi possivel abrir o link agora. Tente novamente.'),
+      SnackBar(
+        content: Text('✓ Números copiados: $texto'),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0E12),
-      body: SafeArea(
+      appBar: _pipFocusMode
+          ? null
+          : AppBar(title: const Text('Volante Flutuante • Acessibilidade')),
+      body: Padding(
+        padding: EdgeInsets.fromLTRB(
+          _pipFocusMode ? 6 : 12,
+          _pipFocusMode ? 6 : 12,
+          _pipFocusMode ? 6 : 12,
+          _pipFocusMode ? 6 : 12,
+        ),
         child: LayoutBuilder(
-          builder: (context, c) {
-            final pad = c.maxWidth * 0.06;
-            return SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(pad, 24, pad, 24),
-              child: Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF121A23),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: const Color(0xFF334155),
-                    width: 1.2,
+          builder: (context, constraints) {
+            final compact =
+                constraints.maxHeight < 520 || constraints.maxWidth < 360;
+            final ballSize = _pipFocusMode ? 28.0 : (compact ? 32.0 : 38.0);
+
+            return Column(
+              children: [
+                Expanded(
+                  child: PageView.builder(
+                    controller: _controller,
+                    itemCount: widget.jogos.length,
+                    onPageChanged: (value) {
+                      setState(() => _current = value);
+                      _configurePipActions(
+                        canGoPrevious: value > 0,
+                        canGoNext: value < (widget.jogos.length - 1),
+                      );
+                    },
+                    itemBuilder: (_, i) {
+                      final jogo = widget.jogos[i];
+                      return Card(
+                        elevation: _pipFocusMode ? 0 : (compact ? 1 : 2),
+                        child: Padding(
+                          padding: EdgeInsets.all(
+                            _pipFocusMode ? 6 : (compact ? 8 : 12),
+                          ),
+                          child: Column(
+                            children: [
+                              if (!_pipFocusMode)
+                                Text(
+                                  'COMBINACAO ${(i + 1).toString().padLeft(2, '0')} / ${widget.jogos.length}',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: compact ? 13 : 15,
+                                  ),
+                                ),
+                              if (!_pipFocusMode)
+                                SizedBox(height: compact ? 4 : 8),
+                              Expanded(
+                                child: Center(
+                                  child: Wrap(
+                                    spacing: _pipFocusMode
+                                        ? 3
+                                        : (compact ? 4 : 6),
+                                    runSpacing: _pipFocusMode
+                                        ? 3
+                                        : (compact ? 4 : 6),
+                                    alignment: WrapAlignment.center,
+                                    children: jogo.numeros
+                                        .map(
+                                          (n) => Container(
+                                            width: ballSize,
+                                            height: ballSize,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: isDark
+                                                  ? const Color(0xFF7B1FA2)
+                                                  : const Color(0xFFEDE7F6),
+                                              border: Border.all(
+                                                color: kLotofacilPurple,
+                                                width: 1.2,
+                                              ),
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Text(
+                                              n.toString().padLeft(2, '0'),
+                                              style: TextStyle(
+                                                fontSize: _pipFocusMode
+                                                    ? 10.5
+                                                    : (compact ? 11 : 13),
+                                                fontWeight: FontWeight.bold,
+                                                color: isDark
+                                                    ? Colors.white
+                                                    : const Color(0xFF4A148C),
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                        .toList(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: kLotofacilPurple.withOpacity(0.22),
-                            shape: BoxShape.circle,
+                if (!_pipFocusMode) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _launching
+                              ? null
+                              : () => _abrirDestinoComPip(abrirApp: true),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: kLotofacilPurple,
+                            minimumSize: const Size.fromHeight(52),
                           ),
-                          child: const Center(
-                            child: Text(
-                              '+18',
-                              style: TextStyle(
-                                color: kLotofacilPurpleGlow,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'Uso Consciente e Responsabilidade',
-                            style: GoogleFonts.robotoMono(
-                              fontSize: 16,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Este aplicativo é uma ferramenta de auxílio estatístico e análise de tendências. Não realizamos apostas, não temos vínculo com a Caixa Econômica Federal e não garantimos acertos, prêmios ou lucros de qualquer natureza. Loterias são jogos de azar onde a sorte é o fator determinante. Utilize os dados com responsabilidade.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey[300],
-                        height: 1.45,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Identidade do Produto: Simulador e Analista de Probabilidades.',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: Colors.grey[300],
-                        height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Limitação de Responsabilidade: O uso desta ferramenta é de inteira responsabilidade do usuário. As sugestões de jogos são baseadas puramente em cálculos matemáticos sobre dados históricos.',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: Colors.grey[300],
-                        height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Recomendação: uso responsável preferencial para maiores de 18 anos. A classificação indicativa oficial pode variar por país.',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: Color(0xFFFCA5A5),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0B1220),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF334155)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'O jogo deve ser uma forma de entretenimento, não uma fonte de renda. Se precisar de ajuda, acesse o Jogo Responsável da Caixa.',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color: Colors.grey[300],
-                              height: 1.35,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          TextButton.icon(
-                            onPressed: _abrirJogoResponsavel,
-                            icon: const Icon(Icons.open_in_new, size: 16),
-                            label: const Text(
-                              'Abrir Link do Jogo Responsável da Caixa',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: _naoMostrarNovamente,
-                      activeColor: kLotofacilPurple,
-                      checkColor: Colors.white,
-                      title: Text(
-                        'Não mostrar esta mensagem novamente',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: Colors.grey[300],
+                          icon: const Icon(Icons.apps),
+                          label: const Text('Abrir app externo da Caixa'),
                         ),
                       ),
-                      onChanged: _salvando
-                          ? null
-                          : (value) {
-                              setState(
-                                () => _naoMostrarNovamente = value ?? false,
-                              );
-                            },
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _salvando ? null : _aceitarTermos,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: kLotofacilPurple,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _launching
+                              ? null
+                              : () => _abrirDestinoComPip(abrirApp: false),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: kLotofacilPurple,
+                            minimumSize: const Size.fromHeight(52),
+                          ),
+                          icon: const Icon(Icons.open_in_browser),
+                          label: const Text('Abrir fonte publica da Caixa'),
                         ),
-                        child: _salvando
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text(
-                                'Li e aceito os termos de uso responsável',
-                              ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.tonalIcon(
+                      onPressed: _copiarJogoAtual,
+                      icon: const Icon(Icons.content_copy),
+                      label: const Text('Copiar combinacao atual'),
                     ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: SystemNavigator.pop,
-                        child: const Text('Sair'),
-                      ),
+                  ),
+                ],
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  height: 24,
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  color: const Color(0xFF0F172A),
+                  child: const MarqueeText(
+                    text:
+                        'Este app é independente. Registro somente nos canais oficiais. Este app fornece simulações matemáticas e não garante resultados. O usuário é o único responsável pelo uso dos dados obtidos neste app, estando este app isento de responsabilidade por eventuais prejuízos decorrentes das aplicações financeiras realizadas pelo usuário. Fonte: loterias.caixa.gov.br.',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.white,
+                      fontFamily: 'Roboto',
+                      fontFamilyFallback: ['Arial', 'sans-serif'],
                     ),
-                  ],
+                    pixelsPerSecond: 14, // Mais lento ainda
+                  ),
                 ),
-              ),
+              ],
             );
           },
         ),
@@ -1829,7 +1818,7 @@ class JogoIA {
 
   factory JogoIA.fromJson(Map<String, dynamic> json) {
     return JogoIA(
-      numeros: List<int>.from(json['jogo']),
+      numeros: List<int>.from(json['combinacao'] ?? json['jogo'] ?? []),
       iaRating: (json['ia_rating'] as num).toInt(),
       tagEstrategica: json['tag_estrategica'] ?? '',
       tag: json['tag'] ?? '',
@@ -1955,6 +1944,9 @@ class _ProcessingConsoleState extends State<ProcessingConsole> {
     final totalConcursos = widget.concursosAnalisados > 0
         ? widget.concursosAnalisados
         : 0;
+    final diagnostico = widget.diagnostico;
+    final concursoAtual = diagnostico?.ultimoConcurso ?? totalConcursos;
+    final proximoConcurso = diagnostico?.proximoConcurso ?? (concursoAtual + 1);
     _linhas.addAll([
       '> INICIALIZANDO PIPELINE DE INFERENCIA...',
       '> CONECTANDO AO NUCLEO ESTATISTICO (FASTAPI)...',
@@ -1964,6 +1956,8 @@ class _ProcessingConsoleState extends State<ProcessingConsole> {
       '> FILTRO ANTI-DIVISAO APLICADO COM SUCESSO.',
       '> CALCULANDO IA RATING FINAL...',
       '> SUCESSO: ${widget.jogos.length} COMBINACOES OTIMIZADAS.',
+      '> CONCURSO ATUAL: $concursoAtual',
+      '> PRÓXIMO CONCURSO: $proximoConcurso',
     ]);
     _executarLog();
   }
@@ -2013,7 +2007,9 @@ class _ProcessingConsoleState extends State<ProcessingConsole> {
                   width: double.infinity,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: kSignalGreen.withOpacity(0.45)),
+                    border: Border.all(
+                      color: kSignalGreen.withValues(alpha: 0.45),
+                    ),
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
@@ -2063,11 +2059,11 @@ class _ProcessingConsoleState extends State<ProcessingConsole> {
                         const SizedBox(height: 8),
                         Text(
                           _finalizando
-                              ? 'TRANSICAO PARA RESULTADOS...'
+                              ? 'TRANSICAO PARA REFERENCIAS...'
                               : 'PROCESSANDO...',
                           style: GoogleFonts.robotoMono(
                             fontSize: compact ? 10 : 11,
-                            color: kSignalGreen.withOpacity(0.85),
+                            color: kSignalGreen.withValues(alpha: 0.85),
                           ),
                         ),
                       ],
@@ -2092,7 +2088,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
+class _HomePageState extends State<HomePage>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   List<JogoIA> jogos = [];
   bool carregando = false;
   bool carregandoDiagnostico = false;
@@ -2107,7 +2104,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     'Avaliando padrões de intervalo...',
     'Otimizando distribuição dos volantes...',
     'Aplicando filtros de consistência...',
-    'Calculando índice de qualidade da aposta...',
+    'Calculando indice de aderencia estatistica...',
   ];
   int _loadingTextIndex = 0;
   late AnimationController _loadingAnimController;
@@ -2159,19 +2156,37 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       duration: const Duration(seconds: 55),
     )..repeat();
     _fetchDiagnostico();
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tickerController.dispose();
     _loadingAnimController.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _tickerController.stop();
+      _loadingAnimController.stop();
+    } else if (state == AppLifecycleState.resumed) {
+      if (!_tickerController.isAnimating) {
+        _tickerController.repeat();
+      }
+      if (carregando && !_loadingAnimController.isAnimating) {
+        _loadingAnimController.repeat();
+      }
+    }
+  }
+
   String get _tickerText {
     final d = diagnostico;
     if (d == null) {
-      return 'PREPARANDO ANÁLISE PARA MELHORAR SUAS APOSTAS  |  SINCRONIZANDO BASE HISTÓRICA  |  CARREGANDO PARÂMETROS';
+      return 'PREPARANDO ANALISE ESTATISTICA  |  SINCRONIZANDO BASE HISTORICA  |  CARREGANDO PARAMETROS';
     }
 
     final atrasadas = d.atrasadasDetectadas.isEmpty
@@ -2229,12 +2244,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     });
 
     try {
-      final response = await _getFromProductionBackend(
-        '/gerar-jogos?estrategia=$estrategiaSelecionada',
+      http.Response? response = await _getFromProductionBackend(
+        '/gerar-combinacoes?estrategia=$estrategiaSelecionada',
       );
+
+      // Compatibilidade: backend em produção pode ainda estar no endpoint antigo.
+      if (response == null || response.statusCode == 404) {
+        response = await _getFromProductionBackend(
+          '/gerar-jogos?estrategia=$estrategiaSelecionada',
+        );
+      }
+
       if (response != null && response.statusCode == 200) {
         final data = json.decode(response.body);
-        final novosJogos = (data['jogos'] as List)
+        final novosJogos = ((data['combinacoes'] ?? data['jogos']) as List)
             .map((j) => JogoIA.fromJson(j))
             .toList();
         setState(() {
@@ -2259,8 +2282,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _tentarGerarJogos() async {
-    await _showSimulatedAdDialog();
-    if (!mounted) return;
+    final liberado = await showFullscreenRewardedAdGate(context);
+    if (!mounted || !liberado) return;
 
     final novosJogos = await _buscarJogos();
     if (!mounted || novosJogos == null) return;
@@ -2278,70 +2301,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> _showSimulatedAdDialog() async {
-    final completer = Completer<void>();
-    bool fechado = false;
-
-    void finalizar() {
-      if (fechado) return;
-      fechado = true;
-      if (Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-      if (!completer.isCompleted) {
-        completer.complete();
-      }
-    }
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Row(
-            children: [
-              Icon(Icons.smart_toy, color: Color(0xFF4A148C)),
-              SizedBox(width: 8),
-              Text('Preparando IA'),
-            ],
-          ),
-          content: const Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.play_circle_fill, size: 64, color: Color(0xFF4A148C)),
-              SizedBox(height: 16),
-              Text('Assistindo vídeo promocional...'),
-              SizedBox(height: 8),
-              Text('⏱️ Aguarde...', style: TextStyle(fontSize: 12)),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                if (!completer.isCompleted) {
-                  completer.complete();
-                }
-                Navigator.of(ctx).pop();
-                fechado = true;
-              },
-              child: const Text('PULAR (SIMULAÇÃO)'),
-            ),
-          ],
-        );
-      },
-    );
-
-    Future.delayed(const Duration(seconds: 3), () {
-      if (!mounted) return;
-      finalizar();
-    });
-
-    await completer.future;
-  }
-
   void _showMsg(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -2353,10 +2312,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _showRetrySnack(String msg) {
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg),
+        content: Row(
+          children: [
+            Expanded(child: Text(msg)),
+            IconButton(
+              onPressed: () {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              },
+              icon: const Icon(Icons.close),
+              tooltip: 'Fechar',
+            ),
+          ],
+        ),
         behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 8),
         action: SnackBarAction(
           label: 'Tentar novamente',
           onPressed: () {
@@ -2481,19 +2453,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  void _abrirSiteCaixa() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => WebViewScreen(
-          url:
-              'https://loterias.caixa.gov.br/wps/portal/loterias/landing/lotofacil',
-          title: 'Lotofácil - Caixa',
-          jogos: jogos
-              .map((j) => {'jogo': j.numeros, 'ia_rating': j.iaRating})
-              .toList(),
+  Future<void> _abrirSiteCaixa() async {
+    if (jogos.isNotEmpty && mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PipVolantePage(jogos: jogos, initialIndex: 0),
         ),
-      ),
-    );
+      );
+      return;
+    }
+
+    final abriu = await abrirLotofacilEmCanalOficial();
+    if (abriu) return;
+    _showMsg('❌ Não foi possível abrir a fonte pública da Lotofácil.');
   }
 
   void _mostrarVolanteFlutante(int jogoInicial) {
@@ -2518,7 +2490,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'Jogo ${jogoAtual + 1}/10',
+                          'Combinacao ${jogoAtual + 1}/10',
                           style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -2660,7 +2632,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 curve: Curves.easeOutCubic,
                               ),
                               icon: const Icon(Icons.arrow_back, size: 18),
-                              label: const Text('Anterior'),
+                              label: const Text('Ver Sequencia'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.grey,
                                 foregroundColor: Colors.white,
@@ -2680,7 +2652,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 );
                               } else {
                                 Navigator.of(ctx).pop();
-                                _showMsg('✅ Todos os jogos revisados!');
+                                _showMsg('✅ Todas as combinacoes revisadas!');
                               }
                             },
                             icon: Icon(
@@ -2691,8 +2663,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                             ),
                             label: Text(
                               jogoAtual < jogos.length - 1
-                                  ? 'Próximo'
-                                  : 'Concluído',
+                                  ? 'Proxima Sugestao'
+                                  : 'Concluido',
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
@@ -2745,7 +2717,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
             value: rating / 1000,
-            backgroundColor: theme.dividerColor.withOpacity(0.5),
+            backgroundColor: theme.dividerColor.withValues(alpha: 0.5),
             valueColor: AlwaysStoppedAnimation<Color>(cor),
             minHeight: compact ? 5 : 8,
           ),
@@ -2768,7 +2740,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  // ── Dashboard de Diagnóstico (flat data) ───────────────────────────────────
+  // ── Painel de Analise de Tendencias (flat data) ───────────────────────────
 
   Widget _buildDashboard({required bool compact, required BoxConstraints c}) {
     final theme = Theme.of(context);
@@ -2795,8 +2767,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       padding: EdgeInsets.all(cardPad),
       decoration: BoxDecoration(
         color: isDark
-            ? const Color(0xFF121A23).withOpacity(disabled ? 0.65 : 0.82)
-            : Colors.white.withOpacity(disabled ? 0.75 : 0.98),
+            ? const Color(0xFF121A23).withValues(alpha: disabled ? 0.65 : 0.82)
+            : Colors.white.withValues(alpha: disabled ? 0.75 : 0.98),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isDark ? const Color(0xFF2D3748) : const Color(0xFFDCE3EE),
@@ -2805,7 +2777,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         boxShadow: [
           BoxShadow(
             color: isDark
-                ? kLotofacilPurpleGlow.withOpacity(0.12)
+                ? kLotofacilPurpleGlow.withValues(alpha: 0.12)
                 : Colors.black12,
             blurRadius: isDark ? 18 : 10,
             spreadRadius: isDark ? 1 : 0,
@@ -2850,7 +2822,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'QUALIDADE DAS APOSTAS',
+                            'PAINEL DE ANALISE DE TENDENCIAS',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -2943,10 +2915,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           height: ballSize,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: theme.colorScheme.primary.withOpacity(0.12),
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: 0.12,
+                            ),
                             border: Border.all(
-                              color: theme.colorScheme.primary.withOpacity(
-                                0.45,
+                              color: theme.colorScheme.primary.withValues(
+                                alpha: 0.45,
                               ),
                             ),
                           ),
@@ -3025,14 +2999,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.primary.withOpacity(0.10),
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.10,
+                          ),
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: theme.colorScheme.primary.withOpacity(0.35),
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: 0.35,
+                            ),
                           ),
                         ),
                         child: Text(
-                          'Apostas otimizadas com base no histórico até o concurso ${d.ultimoConcurso}.',
+                          'Combinacoes otimizadas com base no historico ate o concurso ${d.ultimoConcurso}.',
                           style: TextStyle(
                             fontSize: 11,
                             color: theme.colorScheme.primary,
@@ -3117,12 +3095,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
               color: isDark
-                  ? const Color(0xFF111827).withOpacity(0.45)
+                  ? const Color(0xFF111827).withValues(alpha: 0.45)
                   : const Color(0xFFF8FAFC),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: isDark
-                    ? const Color(0xFF64748B).withOpacity(0.45)
+                    ? const Color(0xFF64748B).withValues(alpha: 0.45)
                     : const Color(0xFFD1D9E6),
               ),
               gradient: LinearGradient(
@@ -3130,10 +3108,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 end: Alignment.bottomRight,
                 colors: [
                   isDark
-                      ? const Color(0xFF1F2937).withOpacity(0.45)
+                      ? const Color(0xFF1F2937).withValues(alpha: 0.45)
                       : Colors.white,
                   isDark
-                      ? const Color(0xFF0F172A).withOpacity(0.15)
+                      ? const Color(0xFF0F172A).withValues(alpha: 0.15)
                       : const Color(0xFFF1F5F9),
                 ],
               ),
@@ -3163,12 +3141,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: isDark
-                ? const Color(0xFF111827).withOpacity(0.45)
+                ? const Color(0xFF111827).withValues(alpha: 0.45)
                 : const Color(0xFFF8FAFC),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: isDark
-                  ? const Color(0xFF64748B).withOpacity(0.45)
+                  ? const Color(0xFF64748B).withValues(alpha: 0.45)
                   : const Color(0xFFD1D9E6),
             ),
             gradient: LinearGradient(
@@ -3176,10 +3154,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               end: Alignment.bottomRight,
               colors: [
                 isDark
-                    ? const Color(0xFF1F2937).withOpacity(0.45)
+                    ? const Color(0xFF1F2937).withValues(alpha: 0.45)
                     : Colors.white,
                 isDark
-                    ? const Color(0xFF0F172A).withOpacity(0.15)
+                    ? const Color(0xFF0F172A).withValues(alpha: 0.15)
                     : const Color(0xFFF1F5F9),
               ],
             ),
@@ -3242,7 +3220,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         barWidth: 1.8,
                         belowBarData: BarAreaData(
                           show: true,
-                          color: theme.colorScheme.primary.withOpacity(0.18),
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.18,
+                          ),
                         ),
                       ),
                     ],
@@ -3268,7 +3248,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: isDark
-            ? const Color(0xFF0F172A).withOpacity(0.55)
+            ? const Color(0xFF0F172A).withValues(alpha: 0.55)
             : const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
@@ -3432,7 +3412,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           boxShadow: selected
               ? [
                   BoxShadow(
-                    color: kLotofacilPurpleGlow.withOpacity(0.24),
+                    color: kLotofacilPurpleGlow.withValues(alpha: 0.24),
                     blurRadius: 16,
                     spreadRadius: 1,
                   ),
@@ -3498,6 +3478,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final bool hasResultados = jogos.isNotEmpty;
 
     return Scaffold(
+      bottomNavigationBar: const BannerAdStrip(),
       body: LayoutBuilder(
         builder: (context, c) {
           final double h = c.maxHeight;
@@ -3621,7 +3602,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                   context,
                                   'anti_divisao',
                                   'Setup: Anti-Divisao (Low Crowd)',
-                                  'Geracao de combinacoes de baixa densidade populacional. Foco em premio liquido.',
+                                  'Geracao de combinacoes de baixa densidade populacional. Foco em convergencia estatistica.',
                                   Icons.shield,
                                 ),
                               ),
@@ -3641,10 +3622,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 : c.maxWidth - (horizontalPad * 2),
                             child: Text(
                               hasResultados
-                                  ? '${jogos.length} jogos gerados • role para analisar'
+                                  ? '${jogos.length} combinacoes geradas • role para analisar'
                                   : (carregando
                                         ? _loadingTexts[_loadingTextIndex]
-                                        : 'Painel pronto. Dispare o motor para gerar jogos.'),
+                                        : 'Painel pronto. Dispare o motor para gerar combinacoes.'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -3661,14 +3642,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                 backgroundColor: kCaixaBlue,
                                 foregroundColor: Colors.white,
                               ),
-                              label: const Text('Finalizar Site Oficial'),
+                              label: const Text('Abrir Fonte Publica'),
                             ),
                         ],
                       ),
                       if (hasResultados) ...[
                         const SizedBox(height: 6),
                         Text(
-                          'Este app não armazena suas senhas. O login é processado com total segurança pelos servidores da Caixa Econômica Federal.',
+                          'Este app e independente e nao armazena credenciais. Ao abrir a fonte externa da Caixa, qualquer login ocorre diretamente no servico de terceiros.',
                           style: TextStyle(
                             fontSize: 11,
                             color: const Color(0xFF94A3B8),
@@ -3706,7 +3687,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       child: Text(
                         carregando
                             ? _loadingTexts[_loadingTextIndex]
-                            : 'O dashboard está pronto. Toque em GERAR 10 JOGOS.',
+                            : 'O painel está pronto. Toque em Gerar 10 Combinações (Após vídeo).',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                       ),
@@ -3744,7 +3725,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 )
               : const Icon(Icons.play_circle_fill),
           label: Text(
-            carregando ? 'PROCESSANDO IA...' : 'GERAR 10 JOGOS',
+            carregando
+                ? 'PROCESSANDO IA...'
+                : 'Gerar 10 Combinações (Após vídeo)',
             style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w700),
           ),
         ),
@@ -3752,6 +3735,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  // ignore: unused_element
   Widget _buildLoadingView() {
     return Center(
       child: Column(
@@ -3785,6 +3769,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  // ignore: unused_element
   Widget _buildEmptyView() {
     return Center(
       child: Padding(
@@ -3799,12 +3784,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
             const SizedBox(height: 16),
             Text(
-              'Nenhum jogo gerado ainda.',
+              'Nenhuma combinacao gerada ainda.',
               style: TextStyle(fontSize: 16, color: Colors.grey[500]),
             ),
             const SizedBox(height: 8),
             Text(
-              'Clique em "GERAR 10 JOGOS" para iniciar a análise.',
+              'Clique em "Gerar 10 Combinações (Após vídeo)" para iniciar a análise.',
               style: TextStyle(fontSize: 13, color: Colors.grey[400]),
               textAlign: TextAlign.center,
             ),
@@ -3847,7 +3832,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      'JOGO ${i + 1}',
+                      'COMBINACAO ${i + 1}',
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -3878,7 +3863,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         shape: BoxShape.circle,
                         color: isDark
                             ? kLotofacilPurple
-                            : theme.colorScheme.primary.withOpacity(0.1),
+                            : theme.colorScheme.primary.withValues(alpha: 0.1),
                         border: Border.all(
                           color: isDark
                               ? const Color(0xFFCE93D8)
