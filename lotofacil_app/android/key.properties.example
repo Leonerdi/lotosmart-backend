@@ -1,0 +1,4 @@
+storePassword=PREENCHE_FORA_DO_GIT
+keyPassword=PREENCHE_FORA_DO_GIT
+keyAlias=upload
+storeFile=CAMINHO_RELATIVO_OU_ABSOLUTO_DO_KEYSTORE

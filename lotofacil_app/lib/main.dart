@@ -946,7 +946,7 @@ class ResultadosPage extends StatelessWidget {
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(pad, 0, pad, 8),
                   child: Text(
-                    'Este app não armazena suas senhas. O login é processado com total segurança pelos servidores da Caixa Econômica Federal.',
+                    'Este app nao armazena senhas nem processa login. Se voce abrir um canal oficial externo da Caixa, qualquer autenticacao ocorrera diretamente no servico de terceiros.',
                     style: GoogleFonts.roboto(
                       fontSize: (c.maxWidth * 0.027).clamp(10.0, 12.0),
                       color: theme.textTheme.bodySmall?.color,

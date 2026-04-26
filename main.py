@@ -7,10 +7,13 @@ import time
 import threading
 import requests
 import json
-from fastapi import FastAPI
+import re
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from datetime import datetime, timedelta, timezone
 from collections import Counter, deque
+from enum import Enum
 from itertools import combinations
 
 try:
@@ -27,10 +30,56 @@ except Exception:  # pragma: no cover - fallback defensivo
 
 app = FastAPI()
 
+DEFAULT_ALLOWED_ORIGINS = [
+    "https://leonerdi.github.io",
+    "http://localhost",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://localhost:8080",
+    "http://127.0.0.1",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+    "http://127.0.0.1:8080",
+]
+
+
+def _parse_allowed_origins() -> list[str]:
+    raw_value = os.getenv("ALLOWED_ORIGINS", "").strip()
+    if not raw_value:
+        return DEFAULT_ALLOWED_ORIGINS.copy()
+    origins = [origin.strip() for origin in raw_value.split(",") if origin.strip()]
+    return origins or DEFAULT_ALLOWED_ORIGINS.copy()
+
+
+def _resolve_cors_allow_credentials(origins: list[str]) -> bool:
+    if origins == ["*"]:
+        return False
+    return os.getenv("CORS_ALLOW_CREDENTIALS", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+
+
+def _safe_sql_identifier(raw_value: str, fallback: str) -> str:
+    candidate = (raw_value or fallback).strip() or fallback
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", candidate):
+        raise ValueError(
+            "DB_TABLE inválido. Use apenas letras, números e underscore."
+        )
+    return candidate
+
+
+ALLOWED_ORIGINS = _parse_allowed_origins()
+CORS_ALLOW_CREDENTIALS = _resolve_cors_allow_credentials(ALLOWED_ORIGINS)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 
@@ -53,13 +102,19 @@ CFG = {
     "SYNC_TARGET_MINUTE_BRT": int(os.getenv("SYNC_TARGET_MINUTE_BRT", "45")),
     "SYNC_PREP_WINDOW_MINUTES": int(os.getenv("SYNC_PREP_WINDOW_MINUTES", "45")),
     "SYNC_PEAK_WINDOW_MINUTES": int(os.getenv("SYNC_PEAK_WINDOW_MINUTES", "120")),
+    "SYNC_MAX_PROBE_AHEAD": int(os.getenv("SYNC_MAX_PROBE_AHEAD", "12")),
+    "SYNC_MAX_CONSECUTIVE_MISSES": int(os.getenv("SYNC_MAX_CONSECUTIVE_MISSES", "2")),
 }
 
 CSV_PATH = "historico.csv"
 API_BASE = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
 JINA_PROXY_PREFIX = "https://r.jina.ai/http://"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-DB_TABLE = os.getenv("DB_TABLE", "historico_lotofacil").strip() or "historico_lotofacil"
+ADMIN_API_TOKEN = os.getenv("ADMIN_API_TOKEN", "").strip()
+DB_TABLE = _safe_sql_identifier(
+    os.getenv("DB_TABLE", "historico_lotofacil"),
+    fallback="historico_lotofacil",
+)
 CSV_COLUMNS = ["Concurso"] + [f"Bola{i}" for i in range(1, 16)]
 API_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -84,6 +139,22 @@ TAGS_ESTRATEGICAS = [
 BORDAS_VOLANTE = {1, 2, 3, 4, 5, 6, 10, 11, 15, 16, 20, 21, 22, 23, 24, 25}
 DIAGONAIS_VOLANTE = {1, 5, 7, 9, 13, 17, 19, 21, 25}
 CRUZ_VOLANTE = {3, 8, 11, 12, 13, 14, 15, 18, 23}
+
+
+class EstrategiaEnum(str, Enum):
+    equilibrado = "equilibrado"
+    quentes = "quentes"
+    atrasados = "atrasados"
+    anti_divisao = "anti_divisao"
+
+
+def _normalize_estrategia(estrategia: str | EstrategiaEnum | None) -> str:
+    if isinstance(estrategia, EstrategiaEnum):
+        return estrategia.value
+    candidate = (estrategia or EstrategiaEnum.equilibrado.value).lower().strip()
+    if candidate not in {item.value for item in EstrategiaEnum}:
+        raise ValueError("Estratégia inválida")
+    return candidate
 
 _api_session = requests.Session()
 _api_session.headers.update(API_HEADERS)
@@ -112,9 +183,31 @@ _runtime_metrics = {
     "latency_ms_window": deque(maxlen=400),
 }
 
+PUBLIC_RATE_LIMIT_PATHS = {
+    "/diagnostico",
+    "/gerar-combinacoes",
+    "/gerar-jogos",
+    "/similaridade",
+}
+PUBLIC_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("PUBLIC_RATE_LIMIT_WINDOW_SECONDS", "60"))
+PUBLIC_RATE_LIMIT_MAX_REQUESTS = int(os.getenv("PUBLIC_RATE_LIMIT_MAX_REQUESTS", "30"))
+_rate_limit_lock = threading.Lock()
+_rate_limit_hits: dict[tuple[str, str], deque[float]] = {}
+
 _historico_revision = 0
 _storage_initialized = False
 _background_sync_started = False
+
+
+def _require_admin_token(x_admin_token: str | None) -> None:
+    if not ADMIN_API_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="ADMIN_API_TOKEN não configurado no servidor.",
+        )
+
+    if x_admin_token != ADMIN_API_TOKEN:
+        raise HTTPException(status_code=403, detail="Acesso negado.")
 
 if ZoneInfo is not None:
     BRT_TZ = ZoneInfo("America/Sao_Paulo")
@@ -324,13 +417,62 @@ def _snapshot_metrics() -> dict:
     }
 
 
+def _get_client_ip(request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_public_rate_limit(request):
+    if request.method != "GET":
+        return None
+    if request.url.path not in PUBLIC_RATE_LIMIT_PATHS:
+        return None
+    if PUBLIC_RATE_LIMIT_MAX_REQUESTS <= 0 or PUBLIC_RATE_LIMIT_WINDOW_SECONDS <= 0:
+        return None
+
+    now = time.time()
+    key = (_get_client_ip(request), request.url.path)
+
+    with _rate_limit_lock:
+        bucket = _rate_limit_hits.setdefault(key, deque())
+        cutoff = now - PUBLIC_RATE_LIMIT_WINDOW_SECONDS
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+
+        if len(bucket) >= PUBLIC_RATE_LIMIT_MAX_REQUESTS:
+            retry_after = max(1, int(bucket[0] + PUBLIC_RATE_LIMIT_WINDOW_SECONDS - now))
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Muitas requisições. Tente novamente em instantes."},
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        bucket.append(now)
+
+    return None
+
+
 @app.middleware("http")
 async def request_metrics_middleware(request, call_next):
     start = time.perf_counter()
     status_code = 500
     try:
+        rate_limited_response = _check_public_rate_limit(request)
+        if rate_limited_response is not None:
+            status_code = int(rate_limited_response.status_code)
+            return rate_limited_response
+
         response = await call_next(request)
         status_code = int(response.status_code)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+
+        if request.url.path in {"/healthz", "/ops/metrics", "/admin/sync"}:
+            response.headers["Cache-Control"] = "no-store"
+
         return response
     finally:
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -515,7 +657,7 @@ def _resolve_latest_concurso(ultimo_local: int) -> int:
     # Algumas APIs podem devolver um "último" atrasado por cache. Sondamos alguns
     # concursos à frente para capturar publicação recém-disponível.
     probe = max(latest, ultimo_local)
-    max_probe_ahead = 12
+    max_probe_ahead = max(1, int(CFG["SYNC_MAX_PROBE_AHEAD"]))
     for i in range(1, max_probe_ahead + 1):
         payload = _try_fetch_concurso_payload(probe + i)
         if payload is None:
@@ -562,13 +704,27 @@ def sync_database() -> dict:
             }
 
         novos_rows = []
+        consecutive_misses = 0
+        max_consecutive_misses = max(1, int(CFG["SYNC_MAX_CONSECUTIVE_MISSES"]))
         for concurso in range(ultimo_local + 1, ultimo_api + 1):
+            payload = _try_fetch_concurso_payload(concurso)
+            if payload is None:
+                consecutive_misses += 1
+                if consecutive_misses >= max_consecutive_misses:
+                    logger.info(
+                        "Sync: encerrando varredura após %s ausência(s) consecutiva(s) (até concurso %s).",
+                        consecutive_misses,
+                        concurso,
+                    )
+                    break
+                continue
+
+            consecutive_misses = 0
             try:
-                payload = _fetch_api_json(f"{API_BASE}/{concurso}")
                 novos_rows.append(_row_from_api_payload(payload))
             except Exception as e:
-                # Falha pontual não derruba o sync completo.
-                logger.warning("Sync: falha ao buscar concurso %s: %s", concurso, e)
+                # Falha pontual de payload não derruba o sync completo.
+                logger.warning("Sync: payload inválido no concurso %s: %s", concurso, e)
 
         if not novos_rows:
             return {
@@ -663,7 +819,7 @@ def load_historico_blindado():
             return cached["data"]
 
     if not _db_enabled() and not os.path.exists(CSV_PATH):
-        print(f"AVISO: {CSV_PATH} não encontrado. Usando dados temporários.")
+        logger.warning("Historico local indisponivel (%s). Usando base temporaria.", CSV_PATH)
         historico_tmp = [sorted(random.sample(range(1, 26), 15)) for _ in range(300)]
         with _cache_lock:
             _runtime_cache["historico"] = {"key": cache_key, "data": historico_tmp}
@@ -687,7 +843,7 @@ def load_historico_blindado():
             _runtime_cache["historico"] = {"key": cache_key, "data": historico}
         return historico
     except Exception as e:
-        print(f"Erro ao processar o CSV local: {e}")
+        logger.exception("Falha ao processar historico local. Usando base temporaria. Erro: %s", e)
         historico_tmp = [sorted(random.sample(range(1, 26), 15)) for _ in range(300)]
         with _cache_lock:
             _runtime_cache["historico"] = {"key": cache_key, "data": historico_tmp}
@@ -762,8 +918,9 @@ def startup_sync():
 
 
 @app.get("/admin/sync")
-def admin_sync():
+def admin_sync(x_admin_token: str | None = Header(default=None)):
     """Força sincronização manual sem derrubar o serviço em caso de erro."""
+    _require_admin_token(x_admin_token)
     return ensure_database_synced(force=True)
 
 
@@ -772,17 +929,15 @@ def healthz():
     """Healthcheck leve para orquestrador e monitoramento."""
     return {
         "status": "ok",
+        "timestamp": _now_brt().strftime("%Y-%m-%d %H:%M:%S"),
         "sync_status": _last_sync_result.get("status", "unknown"),
-        "storage_backend": "postgres" if _db_enabled() else "csv",
-        "csv_disponivel": os.path.exists(CSV_PATH),
-        "database_url_configurada": bool(DATABASE_URL),
-        "metrics": _snapshot_metrics(),
     }
 
 
 @app.get("/ops/metrics")
-def ops_metrics():
+def ops_metrics(x_admin_token: str | None = Header(default=None)):
     """Métricas operacionais básicas para gatilhos de escala."""
+    _require_admin_token(x_admin_token)
     return {
         "status": "ok",
         "timestamp": _now_brt().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1149,12 +1304,18 @@ def diagnostico():
     return payload
 
 
-@app.get("/gerar-jogos")
-def gerar(estrategia: str = "equilibrado"):
+def _gerar_combinacoes_payload(
+    estrategia: str | EstrategiaEnum = EstrategiaEnum.equilibrado,
+):
     ensure_database_synced()
-    estrategia = (estrategia or "equilibrado").lower().strip()
-    if estrategia not in {"equilibrado", "quentes", "atrasados", "anti_divisao"}:
-        estrategia = "equilibrado"
+    estrategia = _normalize_estrategia(estrategia)
+
+    estrategia_label = {
+        "equilibrado": "Estratégia Equilibrada",
+        "quentes": "Estratégia de Tendência Recente",
+        "atrasados": "Estratégia de Atraso Estatístico",
+        "anti_divisao": "Estratégia de Distribuição Diferenciada",
+    }
 
     historico = load_historico_blindado()
     contexto = _get_contexto_analitico(historico)
@@ -1165,9 +1326,43 @@ def gerar(estrategia: str = "equilibrado"):
     cold_set = contexto["cold_set"]
     soma_ideal = contexto["equilibrio"]["soma_ideal"]
 
+    # Evita top-10 com jogos quase idênticos, ampliando cobertura do conjunto final.
+    max_overlap_top = int(os.getenv("TOP_MAX_OVERLAP", "13"))
+    max_overlap_top = max(10, min(14, max_overlap_top))
+
+    def _select_diverse_top(cands: list[dict], k: int, max_overlap: int) -> list[dict]:
+        ranked = sorted(cands, key=lambda x: x["ia_rating"], reverse=True)
+        selected = []
+        selected_sets = []
+
+        for cand in ranked:
+            cand_set = set(cand["combinacao"])
+            if all(len(cand_set & s) <= max_overlap for s in selected_sets):
+                selected.append(cand)
+                selected_sets.append(cand_set)
+                if len(selected) >= k:
+                    return selected
+
+        # Fallback: se a diversidade impedir preencher k, completa por score bruto.
+        for cand in ranked:
+            if cand not in selected:
+                selected.append(cand)
+                if len(selected) >= k:
+                    break
+        return selected
+
     candidates = []
-    for _ in range(CFG["CANDIDATES"]):
+    seen = set()
+    attempts = 0
+    max_attempts = max(CFG["CANDIDATES"] * 3, 3000)
+    while len(candidates) < CFG["CANDIDATES"] and attempts < max_attempts:
+        attempts += 1
         jogo = sorted(random.sample(range(1, 26), 15))
+        jogo_key = tuple(jogo)
+        if jogo_key in seen:
+            continue
+        seen.add(jogo_key)
+
         rating = score_game(
             jogo,
             freq,
@@ -1180,24 +1375,45 @@ def gerar(estrategia: str = "equilibrado"):
         )
         tag_estrategica = escolher_tag(jogo, hot_set, cold_set, soma_ideal)
         if estrategia == "anti_divisao":
-            tag_estrategica = "Anti-Divisao Estatistica"
+            tag_estrategica = "Distribuição Estatística Diferenciada"
         candidates.append(
             {
-                "jogo": jogo,
+                "combinacao": jogo,
                 "ia_rating": rating,
                 "tag_estrategica": tag_estrategica,
-                "tag": f"Estratégia Aplicada: {estrategia.capitalize()}",
+                "tag": estrategia_label.get(estrategia, "Estratégia Equilibrada"),
             }
         )
 
-    melhores = sorted(candidates, key=lambda x: x["ia_rating"], reverse=True)[:CFG["NUM_GAMES"]]
+    melhores = _select_diverse_top(
+        candidates,
+        k=CFG["NUM_GAMES"],
+        max_overlap=max_overlap_top,
+    )
 
     return {
         "status": "sucesso",
         "timestamp": datetime.now().strftime("%H:%M:%S"),
         "estrategia": estrategia,
-        "jogos": melhores,
+        "combinacoes": melhores,
     }
+
+
+@app.get("/gerar-combinacoes")
+def gerar_combinacoes(
+    estrategia: EstrategiaEnum = EstrategiaEnum.equilibrado,
+):
+    return _gerar_combinacoes_payload(estrategia)
+
+
+@app.get("/gerar-jogos")
+def gerar_jogos_legacy(
+    estrategia: EstrategiaEnum = EstrategiaEnum.equilibrado,
+):
+    payload = _gerar_combinacoes_payload(estrategia)
+    # Compatibilidade temporaria para clientes antigos.
+    payload["jogos"] = payload.get("combinacoes", [])
+    return payload
 
 
 # ─── ALGORITMO DE SIMILARIDADE DE CICLO (BLOOMBERG-SPEC) ──────────────────────
@@ -1306,7 +1522,7 @@ def _find_similar_cycle(historico, window_size=5):
         },
         "analise": {
             "distancia_euclidiana": round(melhor_distancia, 4),
-            "texto_autoridade": f"Padrão histórico similar identificado nos concursos {int(concurso_similar_start)}-{int(concurso_similar_end)} ({round(similaridade_pct, 1)}% de interseção) — usado para refinar a distribuição das apostas.",
+            "texto_autoridade": f"Padrão histórico similar identificado nos concursos {int(concurso_similar_start)}-{int(concurso_similar_end)} ({round(similaridade_pct, 1)}% de interseção) — usado para refinar a distribuição das simulações estatísticas.",
         },
         "v_now": [round(x, 2) for x in v_now],
     }
@@ -1334,5 +1550,5 @@ def similaridade():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "8000"))
-    print(f"API LotoSmart iniciada em http://0.0.0.0:{port}")
+    logger.info("API LotoSmart iniciada em http://0.0.0.0:%s", port)
     uvicorn.run(app, host="0.0.0.0", port=port)

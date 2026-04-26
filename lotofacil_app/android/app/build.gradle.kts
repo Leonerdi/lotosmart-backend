@@ -13,6 +13,29 @@ val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
+fun readSigningValue(propertyKey: String, envKey: String): String? {
+    val envValue = System.getenv(envKey)?.trim()
+    if (!envValue.isNullOrBlank()) {
+        return envValue
+    }
+
+    val propertyValue = (keystoreProperties[propertyKey] as String?)?.trim()
+    if (!propertyValue.isNullOrBlank()) {
+        return propertyValue
+    }
+
+    return null
+}
+
+val signingStoreFilePath = readSigningValue("storeFile", "SIGNING_STORE_FILE")
+val signingStorePassword = readSigningValue("storePassword", "SIGNING_STORE_PASSWORD")
+val signingKeyAlias = readSigningValue("keyAlias", "SIGNING_KEY_ALIAS")
+val signingKeyPassword = readSigningValue("keyPassword", "SIGNING_KEY_PASSWORD")
+val hasReleaseSigningConfig =
+    !signingStoreFilePath.isNullOrBlank() &&
+        !signingStorePassword.isNullOrBlank() &&
+        !signingKeyAlias.isNullOrBlank() &&
+        !signingKeyPassword.isNullOrBlank()
 val adMobAppId =
     (project.findProperty("ADMOB_APP_ID") as String?)
         ?.takeIf { it.isNotBlank() }
@@ -43,20 +66,20 @@ android {
 
     signingConfigs {
         create("release") {
-            if (keystorePropertiesFile.exists()) {
-                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["storePassword"] as String
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String
+            if (hasReleaseSigningConfig) {
+                storeFile = rootProject.file(signingStoreFilePath!!)
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
             }
         }
     }
 
     buildTypes {
         release {
-            if (!keystorePropertiesFile.exists()) {
+            if (!hasReleaseSigningConfig) {
                 throw GradleException(
-                    "Release signing requires android/key.properties with production credentials.",
+                    "Release signing requires SIGNING_* environment variables or android/key.properties with production credentials.",
                 )
             }
             signingConfig = signingConfigs.getByName("release")
