@@ -1157,6 +1157,40 @@ def calcular_alerta_probabilistico(historico):
     }
 
 
+def calcular_fechamento_ciclo_dezenas(historico, window=5):
+    """
+    Calcula o estado do ciclo de dezenas em uma janela recente.
+
+    A ideia operacional: quanto menos dezenas faltantes para cobrir 1..25
+    nos ultimos concursos da janela, maior a prioridade dessas faltantes.
+    """
+    if not historico:
+        return {
+            "janela": 0,
+            "dezenas_faltantes": [],
+            "faltantes": 25,
+            "status": "dados_insuficientes",
+        }
+
+    janela = historico[-window:] if len(historico) >= window else historico
+    vistas = {n for draw in janela for n in draw}
+    faltantes = sorted(set(range(1, 26)) - vistas)
+
+    if len(faltantes) <= 2:
+        status = "fechamento_iminente"
+    elif len(faltantes) <= 4:
+        status = "fechamento_provavel"
+    else:
+        status = "ciclo_aberto"
+
+    return {
+        "janela": len(janela),
+        "dezenas_faltantes": faltantes,
+        "faltantes": len(faltantes),
+        "status": status,
+    }
+
+
 def calcular_penalidade_anti_divisao(jogo):
     numeros = set(jogo)
     hits_borda = len(numeros & BORDAS_VOLANTE)
@@ -1189,7 +1223,17 @@ def obter_contexto_inteligente(historico):
     }
 
 
-def score_game(jogo, freq, short_freq, delay_map, hot_set, cold_set, soma_ideal, estrategia="equilibrado"):
+def score_game(
+    jogo,
+    freq,
+    short_freq,
+    delay_map,
+    hot_set,
+    cold_set,
+    soma_ideal,
+    estrategia="equilibrado",
+    ciclo_faltantes=None,
+):
     """
     Calcula o IA Rating (0-1000) de um jogo.
     Critérios: frequência histórica, peso de quentes, cobertura de atrasadas,
@@ -1232,8 +1276,28 @@ def score_game(jogo, freq, short_freq, delay_map, hot_set, cold_set, soma_ideal,
         # 2.5x na frequência curta para privilegiar dezenas em alta recente
         total = freq_pts + (short_base_pts * 2.5) + hot_pts + (cold_pts * 0.6) + soma_pts + equil_pts
     elif estrategia == "atrasados":
-        # Inverte a lógica para priorizar dezenas mais atrasadas
+        # Prioriza dezenas atrasadas com viés adicional de fechamento de ciclo.
         total = (freq_pts * 0.6) + (short_base_pts * 0.5) + (hot_pts * 0.4) + cold_pts + atraso_pts + soma_pts + equil_pts
+
+        ciclo_faltantes = set(ciclo_faltantes or [])
+        if ciclo_faltantes:
+            hits_ciclo = sum(1 for n in jogo if n in ciclo_faltantes)
+            qtd_faltantes = len(ciclo_faltantes)
+
+            # Quando o ciclo está perto de fechar, exigimos mais cobertura das faltantes.
+            foco = max(1, min(4, qtd_faltantes))
+            cobertura = min(1.0, hits_ciclo / foco)
+            urgencia = 1.45 if qtd_faltantes <= 2 else (1.2 if qtd_faltantes <= 4 else 1.0)
+            bonus_ciclo = cobertura * 200 * urgencia
+
+            # Penaliza combinação que ignora faltantes quando o ciclo está muito próximo.
+            if hits_ciclo == 0:
+                if qtd_faltantes <= 2:
+                    bonus_ciclo -= 70
+                elif qtd_faltantes <= 4:
+                    bonus_ciclo -= 40
+
+            total += bonus_ciclo
     elif estrategia == "anti_divisao":
         penalidade_visual = calcular_penalidade_anti_divisao(jogo)
         bonus_dispersao = calcular_bonus_dispersao(jogo)
@@ -1325,6 +1389,8 @@ def _gerar_combinacoes_payload(
     hot_set = contexto["hot_set"]
     cold_set = contexto["cold_set"]
     soma_ideal = contexto["equilibrio"]["soma_ideal"]
+    ciclo_info = calcular_fechamento_ciclo_dezenas(historico, window=5)
+    ciclo_faltantes = set(ciclo_info.get("dezenas_faltantes", []))
 
     # Evita top-10 com jogos quase idênticos, ampliando cobertura do conjunto final.
     max_overlap_top = int(os.getenv("TOP_MAX_OVERLAP", "13"))
@@ -1372,6 +1438,7 @@ def _gerar_combinacoes_payload(
             cold_set,
             soma_ideal,
             estrategia,
+            ciclo_faltantes=ciclo_faltantes,
         )
         tag_estrategica = escolher_tag(jogo, hot_set, cold_set, soma_ideal)
         if estrategia == "anti_divisao":
