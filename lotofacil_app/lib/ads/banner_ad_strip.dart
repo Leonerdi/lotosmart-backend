@@ -56,9 +56,7 @@ Future<bool> showFullscreenRewardedAdGate(BuildContext context) async {
   if (!kAdsEnabled) return true;
   if (!_isMobileSupported) {
     messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Anuncios em video exigem Android/iOS.'),
-      ),
+      const SnackBar(content: Text('Anuncios em video exigem Android/iOS.')),
     );
     return false;
   }
@@ -246,8 +244,8 @@ class _BannerAdStripState extends State<BannerAdStrip> {
       final status = _loading
           ? 'Carregando banner de teste...'
           : (_loadError == null
-              ? 'Banner de teste aguardando carregamento...'
-              : 'Falha ao carregar banner de teste: $_loadError');
+                ? 'Banner de teste aguardando carregamento...'
+                : 'Falha ao carregar banner de teste: $_loadError');
       return SafeArea(
         top: false,
         child: Container(

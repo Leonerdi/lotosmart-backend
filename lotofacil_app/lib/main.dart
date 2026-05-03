@@ -20,7 +20,8 @@ import 'dart:io' show HttpDate;
 // use: --dart-define=API_BASE_URL=https://seu-dominio.app
 const String kProductionApiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'https://lotosmart-api-1024099909943.southamerica-east1.run.app',
+  defaultValue:
+      'https://lotosmart-api-1024099909943.southamerica-east1.run.app',
 );
 
 const kLotofacilPurple = Color(0xFF7B1FA2);
