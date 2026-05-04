@@ -28,7 +28,20 @@ try:
 except Exception:  # pragma: no cover - fallback defensivo
     ZoneInfo = None
 
-app = FastAPI()
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_API_DOCS = _env_flag("ENABLE_API_DOCS", False)
+
+app = FastAPI(
+    docs_url="/docs" if ENABLE_API_DOCS else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if ENABLE_API_DOCS else None,
+)
 
 DEFAULT_ALLOWED_ORIGINS = [
     "https://leonerdi.github.io",
@@ -470,7 +483,7 @@ async def request_metrics_middleware(request, call_next):
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
 
-        if request.url.path in {"/healthz", "/ops/metrics", "/admin/sync"}:
+        if request.url.path in {"/healthz", "/status", "/ops/metrics", "/admin/sync"}:
             response.headers["Cache-Control"] = "no-store"
 
         return response
@@ -927,6 +940,17 @@ def admin_sync(x_admin_token: str | None = Header(default=None)):
 @app.get("/healthz")
 def healthz():
     """Healthcheck leve para orquestrador e monitoramento."""
+    return _build_health_payload()
+
+
+@app.get("/status")
+def status():
+    """Endpoint alternativo de healthcheck para cenários com proxy restritivo."""
+    return _build_health_payload()
+
+
+def _build_health_payload() -> dict:
+    """Payload padrão de saúde para checks públicos sem dados sensíveis."""
     return {
         "status": "ok",
         "timestamp": _now_brt().strftime("%Y-%m-%d %H:%M:%S"),

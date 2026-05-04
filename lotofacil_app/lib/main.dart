@@ -373,8 +373,7 @@ class _MarqueeTextState extends State<MarqueeText>
   late final AnimationController _controller;
   double _textWidth = 0;
   double _availableWidth = 0;
-  // ignore: unused_field
-  static const double _gap = 0; // Mantém sem espaço visível
+  static const double _gap = 24;
 
   @override
   void initState() {
@@ -406,14 +405,14 @@ class _MarqueeTextState extends State<MarqueeText>
     _textWidth = nextTextWidth;
     _availableWidth = nextAvailableWidth;
 
-    // O ciclo deve cobrir 2x o texto para garantir continuidade perfeita
+    // Usa um gap fixo para evitar artefatos visuais no fechamento do loop.
     if (_textWidth <= _availableWidth) {
       _controller.stop();
       _controller.value = 0;
       return;
     }
 
-    final cycleWidth = _textWidth * 2;
+    final cycleWidth = _textWidth + _gap;
     final durationMs = (cycleWidth / widget.pixelsPerSecond * 1000).round();
     _controller.duration = Duration(
       milliseconds: durationMs.clamp(5000, 60000),
@@ -442,15 +441,14 @@ class _MarqueeTextState extends State<MarqueeText>
           child: AnimatedBuilder(
             animation: _controller,
             builder: (context, child) {
-              // O deslocamento cobre 2x o texto para garantir ciclo perfeito
-              final offsetX = -_textWidth * 2 * _controller.value;
+              final offsetX = -(_textWidth + _gap) * _controller.value;
               return Transform.translate(
                 offset: Offset(offsetX, 0),
                 child: child,
               );
             },
             child: SizedBox(
-              width: _textWidth * 2,
+              width: (_textWidth * 2) + _gap,
               child: Row(
                 children: [
                   Text(
@@ -459,6 +457,7 @@ class _MarqueeTextState extends State<MarqueeText>
                     style: widget.style,
                     textDirection: TextDirection.ltr,
                   ),
+                  const SizedBox(width: _gap),
                   Text(
                     widget.text,
                     maxLines: 1,
@@ -3379,6 +3378,7 @@ class _HomePageState extends State<HomePage>
     String titulo,
     String sub,
     IconData icon,
+    String? insight,
   ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -3464,6 +3464,54 @@ class _HomePageState extends State<HomePage>
                     : theme.textTheme.bodySmall?.color,
               ),
             ),
+            if (insight != null && insight.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? Colors.white.withValues(alpha: 0.14)
+                      : (isDark
+                            ? const Color(0xFF1F2937)
+                            : const Color(0xFFF1F5F9)),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: selected
+                        ? Colors.white.withValues(alpha: 0.25)
+                        : (isDark
+                              ? const Color(0xFF334155)
+                              : const Color(0xFFD1D9E6)),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.autorenew_rounded,
+                      size: 12,
+                      color: selected
+                          ? Colors.white
+                          : theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        insight,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9.5.sp,
+                          fontWeight: FontWeight.w600,
+                          color: selected
+                              ? Colors.white
+                              : theme.textTheme.bodySmall?.color,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -3575,6 +3623,7 @@ class _HomePageState extends State<HomePage>
                                   'Setup: Equilibrio Estatistico',
                                   'Filtro de Bayes aplicado. Otimizacao para janelas curta/longa simultaneas.',
                                   Icons.balance,
+                                  'Fechamento medio do ciclo dos 25 numeros: 4,4 edicoes.',
                                 ),
                               ),
                               SizedBox(
@@ -3585,6 +3634,7 @@ class _HomePageState extends State<HomePage>
                                   'Setup: Explosao de Atraso',
                                   'Foco em dezenas maduras (Atraso > 4). Algoritmo de compensacao ciclica.',
                                   Icons.bolt,
+                                  'Fechamento medio do ciclo dos 25 numeros: 4,4 edicoes.',
                                 ),
                               ),
                               SizedBox(
@@ -3595,6 +3645,7 @@ class _HomePageState extends State<HomePage>
                                   'Setup: Fluxo Recente (Hotness)',
                                   'Maximizacao de momento. Segue a tendencia das ultimas 10 extracoes.',
                                   Icons.trending_up,
+                                  'Fechamento medio do ciclo dos 25 numeros: 4,4 edicoes.',
                                 ),
                               ),
                               SizedBox(
@@ -3605,6 +3656,7 @@ class _HomePageState extends State<HomePage>
                                   'Setup: Anti-Divisao (Low Crowd)',
                                   'Geracao de combinacoes de baixa densidade populacional. Foco em convergencia estatistica.',
                                   Icons.shield,
+                                  'Fechamento medio do ciclo dos 25 numeros: 4,4 edicoes.',
                                 ),
                               ),
                             ],
