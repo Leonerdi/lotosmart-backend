@@ -322,7 +322,7 @@ Widget buildResponsibleFooter(BoxConstraints c, {double bottom = 30}) {
       bottom,
     ),
     child: Text(
-      'LotoSmart é um software independente de análise estatística. Não realiza apostas, não recebe pagamentos e não possui vínculo com a CEF. Dados extraidos de: loterias.caixa.gov.br. Este app nao representa o governo. O uso dos dados é de inteira responsabilidade do usuário.',
+      'LotoSmart é um software independente de análise estatística. Não realiza apostas, não recebe pagamentos e não possui vínculo com a CEF. Dados extraídos de: loterias.caixa.gov.br. Este app não representa o governo. O uso dos dados é de inteira responsabilidade do usuário.',
       textAlign: TextAlign.center,
       style: TextStyle(
         fontSize: (c.maxWidth * 0.028).clamp(10.0, 12.0),
@@ -338,7 +338,7 @@ Future<void> mostrarAvisoAmbienteExterno(BuildContext context) async {
     builder: (ctx) => AlertDialog(
       title: const Text('Servico Externo de Terceiros'),
       content: const Text(
-        'Voce sera redirecionado para uma fonte publica externa da Caixa. O LotoSmart e independente, sem vinculo com a Caixa, e nao coleta nem armazena suas credenciais.',
+        'Você será redirecionado para uma fonte pública externa da Caixa. O LotoSmart é independente, sem vínculo com a Caixa, e não coleta nem armazena suas credenciais.',
       ),
       actions: [
         TextButton(
@@ -498,11 +498,11 @@ class ResultadosPage extends StatelessWidget {
   void _compartilharTodos() {
     final buffer = StringBuffer();
     buffer.writeln('LotoSmart');
-    buffer.writeln('Estrategia: ${estrategia.toUpperCase()}');
+    buffer.writeln('Estratégia: ${estrategia.toUpperCase()}');
     buffer.writeln('');
     for (int i = 0; i < jogos.length; i++) {
       final j = jogos[i];
-      buffer.writeln('Combinacao ${i + 1} | IA Rating: ${j.iaRating}/1000');
+      buffer.writeln('Combinação ${i + 1} | IA Rating: ${j.iaRating}/1000');
       buffer.writeln(j.numeros.join(', '));
       buffer.writeln('');
     }
@@ -512,7 +512,7 @@ class ResultadosPage extends StatelessWidget {
   void _compartilharUm(int i) {
     final jogo = jogos[i];
     Share.share(
-      'Combinacao ${i + 1} | IA Rating: ${jogo.iaRating}/1000\n${jogo.numeros.join(', ')}',
+      'Combinação ${i + 1} | IA Rating: ${jogo.iaRating}/1000\n${jogo.numeros.join(', ')}',
     );
   }
 
@@ -670,7 +670,7 @@ class ResultadosPage extends StatelessWidget {
               ),
               pw.SizedBox(height: 12),
               pw.Text(
-                'COMBINACAO ${index + 1}  |  IA Rating: ${jogo.iaRating}/1000',
+                'COMBINAÇÃO ${index + 1}  |  IA Rating: ${jogo.iaRating}/1000',
                 textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(
                   fontSize: 13,
@@ -679,7 +679,7 @@ class ResultadosPage extends StatelessWidget {
               ),
               pw.SizedBox(height: 6),
               pw.Text(
-                'Estrategia: ${estrategia.toUpperCase()}',
+                'Estratégia: ${estrategia.toUpperCase()}',
                 textAlign: pw.TextAlign.center,
                 style: const pw.TextStyle(fontSize: 9),
               ),
@@ -698,7 +698,7 @@ class ResultadosPage extends StatelessWidget {
               ),
               pw.Spacer(),
               pw.Text(
-                'Uso pessoal | Nao garante premiacao | Confira sempre em fonte publica da Caixa',
+                'Uso pessoal | Não garante premiação | Confira sempre em fonte pública da Caixa',
                 textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(
                   fontSize: 8,
@@ -736,7 +736,7 @@ class ResultadosPage extends StatelessWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao gerar PDF da combinacao: $e')),
+          SnackBar(content: Text('Erro ao gerar PDF da combinação: $e')),
         );
       }
     }
@@ -768,7 +768,7 @@ class ResultadosPage extends StatelessWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao gerar PDF das combinacoes: $e')),
+          SnackBar(content: Text('Erro ao gerar PDF das combinações: $e')),
         );
       }
     }
@@ -842,7 +842,7 @@ class ResultadosPage extends StatelessWidget {
           elevation: 10,
           icon: const Icon(Icons.account_balance_wallet, size: 22),
           label: const Text(
-            'Abrir Fonte Publica da Caixa',
+            'Abrir Fonte Pública da Caixa',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w700,
@@ -905,7 +905,7 @@ class ResultadosPage extends StatelessWidget {
                             const SizedBox(height: 6),
                             Text(
                               diagnostico?.regimeDescricao ??
-                                  'Analise estatística aplicada às combinações geradas.',
+                                  'Análise estatística aplicada às combinações geradas.',
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: GoogleFonts.roboto(
@@ -946,7 +946,7 @@ class ResultadosPage extends StatelessWidget {
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(pad, 0, pad, 8),
                   child: Text(
-                    'Este app nao armazena senhas nem processa login. Se voce abrir um canal oficial externo da Caixa, qualquer autenticacao ocorrera diretamente no servico de terceiros.',
+                    'Este app não armazena senhas nem processa login. Se você abrir um canal oficial externo da Caixa, qualquer autenticação ocorrerá diretamente no serviço de terceiros.',
                     style: GoogleFonts.roboto(
                       fontSize: (c.maxWidth * 0.027).clamp(10.0, 12.0),
                       color: theme.textTheme.bodySmall?.color,
@@ -1187,7 +1187,7 @@ class _CompliancePageState extends State<CompliancePage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Nao foi possivel abrir a fonte publica no momento.'),
+        content: Text('Não foi possível abrir a fonte pública no momento.'),
       ),
     );
   }
@@ -1316,7 +1316,7 @@ class _CompliancePageState extends State<CompliancePage> {
                       onPressed: _abrirJogoResponsavel,
                       icon: const Icon(Icons.open_in_new, size: 16),
                       label: const Text(
-                        'Abrir fonte publica de uso responsavel da Caixa',
+                        'Abrir fonte pública de uso responsável da Caixa',
                       ),
                     ),
                   ],
@@ -1351,7 +1351,7 @@ class _CompliancePageState extends State<CompliancePage> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Fontes governamentais publicas (Caixa):',
+                      'Fontes governamentais públicas (Caixa):',
                       style: GoogleFonts.roboto(
                         fontSize: 12.5,
                         color: Colors.white,
@@ -1360,7 +1360,7 @@ class _CompliancePageState extends State<CompliancePage> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Lotofacil (fonte publica):',
+                      'Lotofácil (fonte pública):',
                       style: GoogleFonts.roboto(
                         fontSize: 12,
                         color: Colors.white70,
@@ -1376,11 +1376,11 @@ class _CompliancePageState extends State<CompliancePage> {
                     TextButton.icon(
                       onPressed: _abrirLotofacilFontePublica,
                       icon: const Icon(Icons.open_in_new, size: 16),
-                      label: const Text('Abrir fonte publica da Lotofacil'),
+                      label: const Text('Abrir fonte pública da Lotofácil'),
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Jogo responsavel (fonte publica):',
+                      'Jogo responsável (fonte pública):',
                       style: GoogleFonts.roboto(
                         fontSize: 12,
                         color: Colors.white70,
@@ -1397,7 +1397,7 @@ class _CompliancePageState extends State<CompliancePage> {
                       onPressed: _abrirJogoResponsavel,
                       icon: const Icon(Icons.open_in_new, size: 16),
                       label: const Text(
-                        'Abrir fonte publica de uso responsavel',
+                        'Abrir fonte pública de uso responsável',
                       ),
                     ),
                   ],
@@ -1669,16 +1669,18 @@ class _PipVolantePageState extends State<PipVolantePage>
                           ),
                           child: Column(
                             children: [
-                              if (!_pipFocusMode)
-                                Text(
-                                  'COMBINACAO ${(i + 1).toString().padLeft(2, '0')} / ${widget.jogos.length}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: compact ? 13 : 15,
-                                  ),
+                              Text(
+                                'COMBINAÇÃO ${(i + 1).toString().padLeft(2, '0')} / ${widget.jogos.length}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: _pipFocusMode
+                                      ? 10.5
+                                      : (compact ? 13 : 15),
                                 ),
-                              if (!_pipFocusMode)
-                                SizedBox(height: compact ? 4 : 8),
+                              ),
+                              SizedBox(
+                                height: _pipFocusMode ? 4 : (compact ? 4 : 8),
+                              ),
                               Expanded(
                                 child: Center(
                                   child: Wrap(
@@ -1758,7 +1760,7 @@ class _PipVolantePageState extends State<PipVolantePage>
                             minimumSize: const Size.fromHeight(52),
                           ),
                           icon: const Icon(Icons.open_in_browser),
-                          label: const Text('Abrir fonte publica da Caixa'),
+                          label: const Text('Abrir fonte pública da Caixa'),
                         ),
                       ),
                     ],
@@ -1769,7 +1771,7 @@ class _PipVolantePageState extends State<PipVolantePage>
                     child: FilledButton.tonalIcon(
                       onPressed: _copiarJogoAtual,
                       icon: const Icon(Icons.content_copy),
-                      label: const Text('Copiar combinacao atual'),
+                      label: const Text('Copiar combinação atual'),
                     ),
                   ),
                 ],
@@ -1844,6 +1846,11 @@ class Diagnostico {
   final int proximoConcurso;
   final double desvioPadraoSoma;
   final String similaridadeTexto;
+  final List<int> cicloDezenasFaltantes;
+  final int cicloJanela;
+  final int cicloFaltantes;
+  final String cicloStatus;
+  final double cicloMediaConcursos;
 
   Diagnostico({
     required this.regimeLabel,
@@ -1863,6 +1870,11 @@ class Diagnostico {
     required this.proximoConcurso,
     required this.desvioPadraoSoma,
     required this.similaridadeTexto,
+    required this.cicloDezenasFaltantes,
+    required this.cicloJanela,
+    required this.cicloFaltantes,
+    required this.cicloStatus,
+    required this.cicloMediaConcursos,
   });
 
   factory Diagnostico.fromJson(Map<String, dynamic> json) {
@@ -1873,6 +1885,8 @@ class Diagnostico {
         (inteligencia['similaridade_ciclica'] as Map<String, dynamic>?) ?? {};
     final similaridadeAnalise =
         (similaridade['analise'] as Map<String, dynamic>?) ?? {};
+    final ciclo =
+        (inteligencia['ciclo_fechamento'] as Map<String, dynamic>?) ?? {};
 
     return Diagnostico(
       regimeLabel: json['regime']['label'],
@@ -1907,6 +1921,16 @@ class Diagnostico {
       desvioPadraoSoma:
           (json['equilibrio']['desvio_padrao_soma'] as num?)?.toDouble() ?? 0,
       similaridadeTexto: similaridadeAnalise['texto_autoridade'] ?? '',
+      cicloDezenasFaltantes: List<int>.from(
+        ((ciclo['dezenas_faltantes'] as List?) ?? []).map(
+          (item) => (item as num).toInt(),
+        ),
+      ),
+      cicloJanela: (ciclo['janela'] as num?)?.toInt() ?? 0,
+      cicloFaltantes: (ciclo['faltantes'] as num?)?.toInt() ?? 0,
+      cicloStatus: (ciclo['status'] as String?) ?? 'dados_insuficientes',
+      cicloMediaConcursos:
+          (ciclo['media_fechamento_concursos'] as num?)?.toDouble() ?? 4.4,
     );
   }
 }
@@ -1948,14 +1972,14 @@ class _ProcessingConsoleState extends State<ProcessingConsole> {
     final concursoAtual = diagnostico?.ultimoConcurso ?? totalConcursos;
     final proximoConcurso = diagnostico?.proximoConcurso ?? (concursoAtual + 1);
     _linhas.addAll([
-      '> INICIALIZANDO PIPELINE DE INFERENCIA...',
+      '> INICIALIZANDO PIPELINE DE INFERÊNCIA...',
       '> CONECTANDO AO NUCLEO ESTATISTICO (FASTAPI)...',
-      '> CARREGANDO HISTORICO: $totalConcursos REGISTROS...',
+      '> CARREGANDO HISTÓRICO: $totalConcursos REGISTROS...',
       '> ANALISANDO DISTANCIA EUCLIDIANA DOS VETORES...',
       '> EXECUTANDO SIMULACAO DE MONTE CARLO...',
       '> FILTRO ANTI-DIVISAO APLICADO COM SUCESSO.',
       '> CALCULANDO IA RATING FINAL...',
-      '> SUCESSO: ${widget.jogos.length} COMBINACOES OTIMIZADAS.',
+      '> SUCESSO: ${widget.jogos.length} COMBINAÇÕES OTIMIZADAS.',
       '> CONCURSO ATUAL: $concursoAtual',
       '> PRÓXIMO CONCURSO: $proximoConcurso',
     ]);
@@ -2059,7 +2083,7 @@ class _ProcessingConsoleState extends State<ProcessingConsole> {
                         const SizedBox(height: 8),
                         Text(
                           _finalizando
-                              ? 'TRANSICAO PARA REFERENCIAS...'
+                              ? 'TRANSIÇÃO PARA REFERÊNCIAS...'
                               : 'PROCESSANDO...',
                           style: GoogleFonts.robotoMono(
                             fontSize: compact ? 10 : 11,
@@ -2093,6 +2117,7 @@ class _HomePageState extends State<HomePage>
   List<JogoIA> jogos = [];
   bool carregando = false;
   bool carregandoDiagnostico = false;
+  bool geracaoEmAndamento = false;
   Diagnostico? diagnostico;
   String estrategiaSelecionada = 'equilibrado';
 
@@ -2104,7 +2129,7 @@ class _HomePageState extends State<HomePage>
     'Avaliando padrões de intervalo...',
     'Otimizando distribuição dos volantes...',
     'Aplicando filtros de consistência...',
-    'Calculando indice de aderencia estatistica...',
+    'Calculando índice de aderência estatística...',
   ];
   int _loadingTextIndex = 0;
   late AnimationController _loadingAnimController;
@@ -2138,7 +2163,7 @@ class _HomePageState extends State<HomePage>
     try {
       return await http
           .get(Uri.parse('$kProductionApiBaseUrl$endpoint'))
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 8));
     } catch (_) {
       return null;
     }
@@ -2186,7 +2211,7 @@ class _HomePageState extends State<HomePage>
   String get _tickerText {
     final d = diagnostico;
     if (d == null) {
-      return 'PREPARANDO ANALISE ESTATISTICA  |  SINCRONIZANDO BASE HISTORICA  |  CARREGANDO PARAMETROS';
+      return 'PREPARANDO ANÁLISE ESTATÍSTICA  |  SINCRONIZANDO BASE HISTÓRICA  |  CARREGANDO PARÂMETROS';
     }
 
     final atrasadas = d.atrasadasDetectadas.isEmpty
@@ -2282,23 +2307,32 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _tentarGerarJogos() async {
-    final liberado = await showFullscreenRewardedAdGate(context);
-    if (!mounted || !liberado) return;
+    if (geracaoEmAndamento || carregando) return;
 
-    final novosJogos = await _buscarJogos();
-    if (!mounted || novosJogos == null) return;
+    setState(() => geracaoEmAndamento = true);
+    try {
+      final liberado = await showFullscreenRewardedAdGate(context);
+      if (!mounted || !liberado) return;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ProcessingConsole(
-          jogos: novosJogos,
-          diagnostico: diagnostico,
-          estrategia: estrategiaSelecionada,
-          concursosAnalisados: diagnostico?.concursosAnalisados ?? 0,
-          dataHoraBase: _dataHoraServidorAtual,
+      final novosJogos = await _buscarJogos();
+      if (!mounted || novosJogos == null) return;
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ProcessingConsole(
+            jogos: novosJogos,
+            diagnostico: diagnostico,
+            estrategia: estrategiaSelecionada,
+            concursosAnalisados: diagnostico?.concursosAnalisados ?? 0,
+            dataHoraBase: _dataHoraServidorAtual,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      if (mounted) {
+        setState(() => geracaoEmAndamento = false);
+      }
+    }
   }
 
   void _showMsg(String msg) {
@@ -2490,7 +2524,7 @@ class _HomePageState extends State<HomePage>
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'Combinacao ${jogoAtual + 1}/10',
+                          'Combinação ${jogoAtual + 1}/10',
                           style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -2632,7 +2666,7 @@ class _HomePageState extends State<HomePage>
                                 curve: Curves.easeOutCubic,
                               ),
                               icon: const Icon(Icons.arrow_back, size: 18),
-                              label: const Text('Ver Sequencia'),
+                              label: const Text('Ver Sequência'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.grey,
                                 foregroundColor: Colors.white,
@@ -2652,7 +2686,7 @@ class _HomePageState extends State<HomePage>
                                 );
                               } else {
                                 Navigator.of(ctx).pop();
-                                _showMsg('✅ Todas as combinacoes revisadas!');
+                                _showMsg('✅ Todas as combinações revisadas!');
                               }
                             },
                             icon: Icon(
@@ -2663,8 +2697,8 @@ class _HomePageState extends State<HomePage>
                             ),
                             label: Text(
                               jogoAtual < jogos.length - 1
-                                  ? 'Proxima Sugestao'
-                                  : 'Concluido',
+                                  ? 'Próxima Sugestão'
+                                  : 'Concluído',
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
@@ -2740,7 +2774,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // ── Painel de Analise de Tendencias (flat data) ───────────────────────────
+  // ── Painel de Análise de Tendências (flat data) ───────────────────────────
 
   Widget _buildDashboard({required bool compact, required BoxConstraints c}) {
     final theme = Theme.of(context);
@@ -2796,7 +2830,7 @@ class _HomePageState extends State<HomePage>
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Servidor offline. Inicie o Python para carregar o diagnóstico.',
+                        'Servidor indisponível no momento. Tente recarregar o diagnóstico.',
                         style: TextStyle(
                           fontSize: 13,
                           color: theme.textTheme.bodySmall?.color,
@@ -2822,7 +2856,7 @@ class _HomePageState extends State<HomePage>
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'PAINEL DE ANALISE DE TENDENCIAS',
+                            'PAINEL DE ANÁLISE DE TENDÊNCIAS',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -3010,7 +3044,7 @@ class _HomePageState extends State<HomePage>
                           ),
                         ),
                         child: Text(
-                          'Combinacoes otimizadas com base no historico ate o concurso ${d.ultimoConcurso}.',
+                          'Combinações otimizadas com base no histórico até o concurso ${d.ultimoConcurso}.',
                           style: TextStyle(
                             fontSize: 11,
                             color: theme.colorScheme.primary,
@@ -3027,6 +3061,17 @@ class _HomePageState extends State<HomePage>
                           : d.atrasadasDetectadas
                                 .map((n) => n.toString().padLeft(2, '0'))
                                 .join(', '),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildSignalPanel(
+                      titulo: 'FECHAMENTO DO CICLO (MÉDIA 4,4 CONCURSOS)',
+                      conteudo: d.cicloDezenasFaltantes.isEmpty
+                          ? 'Ciclo próximo do fechamento: nenhuma dezena faltante na janela atual.'
+                          : d.cicloDezenasFaltantes
+                                .map((n) => n.toString().padLeft(2, '0'))
+                                .join(', '),
+                      subtitulo:
+                          'Janela: ${d.cicloJanela} concursos | Faltantes: ${d.cicloFaltantes} | Status: ${d.cicloStatus.replaceAll('_', ' ')}',
                     ),
                     const SizedBox(height: 10),
                     _buildSignalPanel(
@@ -3596,7 +3641,7 @@ class _HomePageState extends State<HomePage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'SETUPS ESTRATEGICOS',
+                        'SETUPS ESTRATÉGICOS',
                         style: TextStyle(
                           fontSize: 10.sp,
                           color: const Color(0xFF6B7280),
@@ -3620,10 +3665,10 @@ class _HomePageState extends State<HomePage>
                                 child: _buildStrategyCard(
                                   context,
                                   'equilibrado',
-                                  'Setup: Equilibrio Estatistico',
-                                  'Filtro de Bayes aplicado. Otimizacao para janelas curta/longa simultaneas.',
+                                  'Setup: Equilíbrio Estatístico',
+                                  'Filtro de Bayes aplicado. Otimização para janelas curta/longa simultâneas.',
                                   Icons.balance,
-                                  'Fechamento medio do ciclo dos 25 numeros: 4,4 edicoes.',
+                                  'Fechamento médio do ciclo dos 25 números: 4,4 concursos.',
                                 ),
                               ),
                               SizedBox(
@@ -3631,10 +3676,10 @@ class _HomePageState extends State<HomePage>
                                 child: _buildStrategyCard(
                                   context,
                                   'atrasados',
-                                  'Setup: Explosao de Atraso',
-                                  'Foco em dezenas maduras (Atraso > 4). Algoritmo de compensacao ciclica.',
+                                  'Setup: Explosão de Atraso',
+                                  'Foco em dezenas maduras (atraso > 4). Algoritmo de compensação cíclica.',
                                   Icons.bolt,
-                                  'Fechamento medio do ciclo dos 25 numeros: 4,4 edicoes.',
+                                  'Fechamento médio do ciclo dos 25 números: 4,4 concursos.',
                                 ),
                               ),
                               SizedBox(
@@ -3643,9 +3688,9 @@ class _HomePageState extends State<HomePage>
                                   context,
                                   'quentes',
                                   'Setup: Fluxo Recente (Hotness)',
-                                  'Maximizacao de momento. Segue a tendencia das ultimas 10 extracoes.',
+                                  'Maximização de momento. Segue a tendência das últimas 10 extrações.',
                                   Icons.trending_up,
-                                  'Fechamento medio do ciclo dos 25 numeros: 4,4 edicoes.',
+                                  'Fechamento médio do ciclo dos 25 números: 4,4 concursos.',
                                 ),
                               ),
                               SizedBox(
@@ -3654,9 +3699,9 @@ class _HomePageState extends State<HomePage>
                                   context,
                                   'anti_divisao',
                                   'Setup: Anti-Divisao (Low Crowd)',
-                                  'Geracao de combinacoes de baixa densidade populacional. Foco em convergencia estatistica.',
+                                  'Geração de combinações de baixa densidade populacional. Foco em convergência estatística.',
                                   Icons.shield,
-                                  'Fechamento medio do ciclo dos 25 numeros: 4,4 edicoes.',
+                                  'Fechamento médio do ciclo dos 25 números: 4,4 concursos.',
                                 ),
                               ),
                             ],
@@ -3675,10 +3720,10 @@ class _HomePageState extends State<HomePage>
                                 : c.maxWidth - (horizontalPad * 2),
                             child: Text(
                               hasResultados
-                                  ? '${jogos.length} combinacoes geradas • role para analisar'
+                                  ? '${jogos.length} combinações geradas • role para analisar'
                                   : (carregando
                                         ? _loadingTexts[_loadingTextIndex]
-                                        : 'Painel pronto. Dispare o motor para gerar combinacoes.'),
+                                        : 'Painel pronto. Dispare o motor para gerar combinações.'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -3695,14 +3740,14 @@ class _HomePageState extends State<HomePage>
                                 backgroundColor: kCaixaBlue,
                                 foregroundColor: Colors.white,
                               ),
-                              label: const Text('Abrir Fonte Publica'),
+                              label: const Text('Abrir Fonte Pública'),
                             ),
                         ],
                       ),
                       if (hasResultados) ...[
                         const SizedBox(height: 6),
                         Text(
-                          'Este app e independente e nao armazena credenciais. Ao abrir a fonte externa da Caixa, qualquer login ocorre diretamente no servico de terceiros.',
+                          'Este app é independente e não armazena credenciais. Ao abrir a fonte externa da Caixa, qualquer login ocorre diretamente no serviço de terceiros.',
                           style: TextStyle(
                             fontSize: 11,
                             color: const Color(0xFF94A3B8),
@@ -3740,7 +3785,7 @@ class _HomePageState extends State<HomePage>
                       child: Text(
                         carregando
                             ? _loadingTexts[_loadingTextIndex]
-                            : 'O painel está pronto. Toque em Gerar 10 Combinações (Após vídeo).',
+                            : 'O painel está pronto. Toque em Gerar 10 Combinações (após vídeo).',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                       ),
@@ -3761,7 +3806,9 @@ class _HomePageState extends State<HomePage>
           return Transform.scale(scale: value, child: child);
         },
         child: FloatingActionButton.extended(
-          onPressed: carregando ? null : _tentarGerarJogos,
+          onPressed: (carregando || geracaoEmAndamento)
+              ? null
+              : _tentarGerarJogos,
           backgroundColor: kLotofacilPurple,
           foregroundColor: Colors.white,
           elevation: 14,
@@ -3776,11 +3823,15 @@ class _HomePageState extends State<HomePage>
                     ),
                   ),
                 )
-              : const Icon(Icons.play_circle_fill),
+              : (geracaoEmAndamento
+                    ? const Icon(Icons.ondemand_video)
+                    : const Icon(Icons.play_circle_fill)),
           label: Text(
             carregando
                 ? 'PROCESSANDO IA...'
-                : 'Gerar 10 Combinações (Após vídeo)',
+                : (geracaoEmAndamento
+                      ? 'AGUARDANDO VÍDEO...'
+                      : 'Gerar 10 Combinações (após vídeo)'),
             style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w700),
           ),
         ),
@@ -3837,12 +3888,12 @@ class _HomePageState extends State<HomePage>
             ),
             const SizedBox(height: 16),
             Text(
-              'Nenhuma combinacao gerada ainda.',
+              'Nenhuma combinação gerada ainda.',
               style: TextStyle(fontSize: 16, color: Colors.grey[500]),
             ),
             const SizedBox(height: 8),
             Text(
-              'Clique em "Gerar 10 Combinações (Após vídeo)" para iniciar a análise.',
+              'Clique em "Gerar 10 Combinações (após vídeo)" para iniciar a análise.',
               style: TextStyle(fontSize: 13, color: Colors.grey[400]),
               textAlign: TextAlign.center,
             ),
@@ -3885,7 +3936,7 @@ class _HomePageState extends State<HomePage>
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      'COMBINACAO ${i + 1}',
+                      'COMBINAÇÃO ${i + 1}',
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,

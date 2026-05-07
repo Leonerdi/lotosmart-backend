@@ -48,6 +48,74 @@ const String kGoogleTestIosRewardedAdUnitId =
 Future<void> initializeMobileAds() async {
   if (!kAdsEnabled || !_isMobileSupported) return;
   await MobileAds.instance.initialize();
+  unawaited(_preloadRewardedAd());
+}
+
+RewardedAd? _cachedRewardedAd;
+Future<void>? _rewardedLoadFuture;
+bool _rewardedShowing = false;
+
+Future<void> _preloadRewardedAd({bool force = false}) async {
+  if (!kAdsEnabled || !_isMobileSupported) return;
+  final unitId = _resolveRewardedUnitId();
+  if (unitId == null) return;
+
+  if (!force && (_cachedRewardedAd != null || _rewardedLoadFuture != null)) {
+    return;
+  }
+
+  final completer = Completer<void>();
+  _rewardedLoadFuture = completer.future;
+
+  await RewardedAd.load(
+    adUnitId: unitId,
+    request: const AdRequest(),
+    rewardedAdLoadCallback: RewardedAdLoadCallback(
+      onAdLoaded: (ad) {
+        _cachedRewardedAd?.dispose();
+        _cachedRewardedAd = ad;
+        _rewardedLoadFuture = null;
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+      },
+      onAdFailedToLoad: (_) {
+        _rewardedLoadFuture = null;
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+      },
+    ),
+  );
+
+  await completer.future;
+}
+
+Future<RewardedAd?> _takePreloadedRewardedAd() async {
+  if (_cachedRewardedAd != null) {
+    final ad = _cachedRewardedAd;
+    _cachedRewardedAd = null;
+    unawaited(_preloadRewardedAd());
+    return ad;
+  }
+
+  unawaited(_preloadRewardedAd());
+
+  final loading = _rewardedLoadFuture;
+  if (loading != null) {
+    try {
+      await loading.timeout(const Duration(milliseconds: 1600));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  final ad = _cachedRewardedAd;
+  _cachedRewardedAd = null;
+  if (ad != null) {
+    unawaited(_preloadRewardedAd());
+  }
+  return ad;
 }
 
 Future<bool> showFullscreenRewardedAdGate(BuildContext context) async {
@@ -65,54 +133,68 @@ Future<bool> showFullscreenRewardedAdGate(BuildContext context) async {
   if (unitId == null) {
     messenger.showSnackBar(
       const SnackBar(
-        content: Text('Unidade de anuncio em video nao configurada.'),
+        content: Text('Unidade de anúncio em vídeo não configurada.'),
       ),
     );
     return false;
   }
 
+  if (_rewardedShowing) {
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Aguarde: já existe um anúncio em exibição.'),
+      ),
+    );
+    return false;
+  }
+
+  final ad = await _takePreloadedRewardedAd();
+  if (ad == null) {
+    // Mantém fluidez: se o vídeo ainda não carregou, libera a ação sem bloquear.
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Vídeo indisponível no momento. Prosseguindo sem anúncio.',
+        ),
+      ),
+    );
+    return true;
+  }
+
   final completer = Completer<bool>();
   bool earned = false;
 
-  await RewardedAd.load(
-    adUnitId: unitId,
-    request: const AdRequest(),
-    rewardedAdLoadCallback: RewardedAdLoadCallback(
-      onAdLoaded: (ad) {
-        ad.fullScreenContentCallback = FullScreenContentCallback(
-          onAdDismissedFullScreenContent: (ad) {
-            ad.dispose();
-            if (!completer.isCompleted) {
-              completer.complete(earned);
-            }
-          },
-          onAdFailedToShowFullScreenContent: (ad, error) {
-            ad.dispose();
-            if (!completer.isCompleted) {
-              completer.complete(false);
-            }
-          },
-        );
+  _rewardedShowing = true;
+  ad.fullScreenContentCallback = FullScreenContentCallback(
+    onAdDismissedFullScreenContent: (ad) {
+      ad.dispose();
+      _rewardedShowing = false;
+      if (!completer.isCompleted) {
+        completer.complete(earned);
+      }
+      unawaited(_preloadRewardedAd());
+    },
+    onAdFailedToShowFullScreenContent: (ad, error) {
+      ad.dispose();
+      _rewardedShowing = false;
+      if (!completer.isCompleted) {
+        completer.complete(false);
+      }
+      unawaited(_preloadRewardedAd(force: true));
+    },
+  );
 
-        ad.show(
-          onUserEarnedReward: (ad, reward) {
-            earned = true;
-          },
-        );
-      },
-      onAdFailedToLoad: (error) {
-        if (!completer.isCompleted) {
-          completer.complete(false);
-        }
-      },
-    ),
+  ad.show(
+    onUserEarnedReward: (ad, reward) {
+      earned = true;
+    },
   );
 
   final unlocked = await completer.future;
   if (!unlocked) {
     messenger.showSnackBar(
       const SnackBar(
-        content: Text('Assista ao video completo para liberar as combinacoes.'),
+        content: Text('Assista ao vídeo completo para liberar as combinações.'),
       ),
     );
   }

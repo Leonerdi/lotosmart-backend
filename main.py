@@ -1215,6 +1215,107 @@ def calcular_fechamento_ciclo_dezenas(historico, window=5):
     }
 
 
+def _build_cycle_phase_config(ciclo_faltantes, delay_map=None) -> dict:
+    qtd_faltantes = len(ciclo_faltantes or [])
+    delay_map = delay_map or {}
+
+    if qtd_faltantes <= 0:
+        return {
+            "phase": "fechado",
+            "min_hits": 0,
+            "forced_hits": 0,
+            "bonus_scale": 0.0,
+            "weight_boost": 1.0,
+            "delay_boost": 0.0,
+        }
+
+    if qtd_faltantes <= 2:
+        return {
+            "phase": "fechamento_iminente",
+            "min_hits": qtd_faltantes,
+            "forced_hits": qtd_faltantes,
+            "bonus_scale": 2.0,
+            "weight_boost": 4.8,
+            "delay_boost": 0.9,
+        }
+
+    if qtd_faltantes <= 4:
+        return {
+            "phase": "fase_avancada",
+            "min_hits": 2,
+            "forced_hits": 2,
+            "bonus_scale": 1.45,
+            "weight_boost": 3.2,
+            "delay_boost": 0.7,
+        }
+
+    if qtd_faltantes <= 7:
+        return {
+            "phase": "fase_intermediaria",
+            "min_hits": 1,
+            "forced_hits": 1,
+            "bonus_scale": 1.15,
+            "weight_boost": 2.0,
+            "delay_boost": 0.45,
+        }
+
+    return {
+        "phase": "fase_inicial",
+        "min_hits": 0,
+        "forced_hits": 0,
+        "bonus_scale": 0.8,
+        "weight_boost": 1.25,
+        "delay_boost": 0.2,
+    }
+
+
+def _weighted_sample_without_replacement(population, sample_size: int, weight_fn):
+    disponiveis = list(population)
+    escolhidos = []
+
+    while disponiveis and len(escolhidos) < sample_size:
+        pesos = [max(0.0001, float(weight_fn(item))) for item in disponiveis]
+        escolhido = random.choices(disponiveis, weights=pesos, k=1)[0]
+        escolhidos.append(escolhido)
+        disponiveis.remove(escolhido)
+
+    return escolhidos
+
+
+def _generate_candidate_game(estrategia: str, delay_map: dict, ciclo_faltantes) -> list[int]:
+    universo = list(range(1, 26))
+    ciclo_faltantes = sorted(set(ciclo_faltantes or []))
+
+    if estrategia != "atrasados" or not ciclo_faltantes:
+        return sorted(random.sample(universo, 15))
+
+    cfg = _build_cycle_phase_config(ciclo_faltantes, delay_map)
+    ordered_cycle = sorted(ciclo_faltantes, key=lambda n: (-delay_map.get(n, 0), n))
+    forced = ordered_cycle[: cfg["forced_hits"]]
+    forced_set = set(forced)
+    max_delay = max(delay_map.values()) if delay_map else 1
+    cycle_set = set(ciclo_faltantes)
+
+    def weight_fn(n: int) -> float:
+        if n in forced_set:
+            return 0.0
+
+        weight = 1.0
+        if n in cycle_set:
+            weight *= cfg["weight_boost"]
+            normalized_delay = delay_map.get(n, 0) / max(1, max_delay)
+            weight *= 1.0 + (normalized_delay * cfg["delay_boost"])
+        return weight
+
+    restantes = [n for n in universo if n not in forced_set]
+    complemento = _weighted_sample_without_replacement(
+        restantes,
+        sample_size=15 - len(forced),
+        weight_fn=weight_fn,
+    )
+    return sorted(forced + complemento)
+
+
 def calcular_penalidade_anti_divisao(jogo):
     numeros = set(jogo)
     hits_borda = len(numeros & BORDAS_VOLANTE)
@@ -1237,6 +1338,9 @@ def obter_contexto_inteligente(historico):
     df_local = _load_historico_df()
     ultimo_concurso = int(df_local["Concurso"].max()) if not df_local.empty else len(historico)
     similaridade = _find_similar_cycle(historico, window_size=5)
+    ciclo_fechamento = calcular_fechamento_ciclo_dezenas(historico, window=5)
+    # Referência histórica observada no projeto para comunicação no app.
+    ciclo_fechamento["media_fechamento_concursos"] = 4.4
     return {
         "ultimo_concurso": ultimo_concurso,
         "proximo_concurso": ultimo_concurso + 1,
@@ -1244,6 +1348,7 @@ def obter_contexto_inteligente(historico):
         "melhores_trincas": calcular_melhores_trincas(historico),
         "alerta_padrao": calcular_alerta_probabilistico(historico),
         "similaridade_ciclica": similaridade,
+        "ciclo_fechamento": ciclo_fechamento,
     }
 
 
@@ -1305,21 +1410,24 @@ def score_game(
 
         ciclo_faltantes = set(ciclo_faltantes or [])
         if ciclo_faltantes:
+            cfg = _build_cycle_phase_config(ciclo_faltantes, delay_map)
             hits_ciclo = sum(1 for n in jogo if n in ciclo_faltantes)
             qtd_faltantes = len(ciclo_faltantes)
+            min_hits = min(int(cfg["min_hits"]), qtd_faltantes)
+
+            delay_hits = [delay_map.get(n, 0) for n in jogo if n in ciclo_faltantes]
+            atraso_medio_hits = (sum(delay_hits) / len(delay_hits)) if delay_hits else 0.0
+            atraso_relativo_hits = atraso_medio_hits / max(1, max_delay) if delay_hits else 0.0
 
             # Quando o ciclo está perto de fechar, exigimos mais cobertura das faltantes.
-            foco = max(1, min(4, qtd_faltantes))
+            foco = max(1, min(max(min_hits, 1), qtd_faltantes))
             cobertura = min(1.0, hits_ciclo / foco)
-            urgencia = 1.45 if qtd_faltantes <= 2 else (1.2 if qtd_faltantes <= 4 else 1.0)
-            bonus_ciclo = cobertura * 200 * urgencia
+            bonus_ciclo = cobertura * 200 * float(cfg["bonus_scale"])
+            bonus_ciclo += atraso_relativo_hits * 70 * float(cfg["bonus_scale"])
 
-            # Penaliza combinação que ignora faltantes quando o ciclo está muito próximo.
-            if hits_ciclo == 0:
-                if qtd_faltantes <= 2:
-                    bonus_ciclo -= 70
-                elif qtd_faltantes <= 4:
-                    bonus_ciclo -= 40
+            # Penaliza combinação que não atende a cobertura mínima esperada da fase.
+            if hits_ciclo < min_hits:
+                bonus_ciclo -= (min_hits - hits_ciclo) * 85 * float(cfg["bonus_scale"])
 
             total += bonus_ciclo
     elif estrategia == "anti_divisao":
@@ -1447,7 +1555,11 @@ def _gerar_combinacoes_payload(
     max_attempts = max(CFG["CANDIDATES"] * 3, 3000)
     while len(candidates) < CFG["CANDIDATES"] and attempts < max_attempts:
         attempts += 1
-        jogo = sorted(random.sample(range(1, 26), 15))
+        jogo = _generate_candidate_game(
+            estrategia=estrategia,
+            delay_map=delay_map,
+            ciclo_faltantes=ciclo_faltantes,
+        )
         jogo_key = tuple(jogo)
         if jogo_key in seen:
             continue
