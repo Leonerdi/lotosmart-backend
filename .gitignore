@@ -39,5 +39,7 @@ GOOGLE_PLAY_API_SETUP.md
 .railwayignore
 
 # Play scripts (may contain secrets)
-scripts/
+scripts/*
+!scripts/publish_play_release.py
+!scripts/publish_play_release.ps1
 play/
