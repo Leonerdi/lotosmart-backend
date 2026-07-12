@@ -39,6 +39,7 @@ type CombatSlice = {
   currentTick: number;
   isPlaying: boolean;
   playbackSpeed: number;
+  isLoadingCombat: boolean;
   setCombatPayload: (payload: CombatLogsPayload) => void;
   setCurrentTick: (next: number | ((previous: number) => number)) => void;
   seekTick: (tick: number) => void;
@@ -46,12 +47,22 @@ type CombatSlice = {
   pause: () => void;
   setPlaybackSpeed: (speed: number) => void;
   skipToEnd: () => void;
+  startCombatLoading: () => void;
+  stopCombatLoading: () => void;
   resetCombat: () => void;
+};
+
+export type AppView = "TAVERNA" | "ARENA";
+
+type ViewSlice = {
+  currentView: AppView;
+  changeView: (view: AppView) => void;
 };
 
 export type GameStore = ProfileSlice &
   InventorySlice &
-  CombatSlice & {
+  CombatSlice &
+  ViewSlice & {
     applySnapshot: (snapshot: ServerViewModel) => void;
   };
 
@@ -127,6 +138,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   currentTick: 0,
   isPlaying: false,
   playbackSpeed: 1,
+  isLoadingCombat: false,
   setCombatPayload: (payload) => {
     const nextLogs = Array.isArray(payload.logs) ? payload.logs : [];
     set({
@@ -134,7 +146,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       combatSummary: payload.summary ?? null,
       combatLogs: nextLogs,
       currentTick: 0,
-      isPlaying: false
+      isPlaying: false,
+      isLoadingCombat: false
     });
   },
   setCurrentTick: (next) => {
@@ -165,6 +178,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const maxTick = Math.max(0, get().combatLogs.length - 1);
     set({ currentTick: maxTick, isPlaying: false });
   },
+  startCombatLoading: () => {
+    set({ isLoadingCombat: true });
+  },
+  stopCombatLoading: () => {
+    set({ isLoadingCombat: false });
+  },
   resetCombat: () => {
     set({
       combatSource: null,
@@ -172,8 +191,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       combatLogs: [],
       currentTick: 0,
       isPlaying: false,
-      playbackSpeed: 1
+      playbackSpeed: 1,
+      isLoadingCombat: false
     });
+  },
+
+  currentView: "TAVERNA",
+  changeView: (view) => {
+    set({ currentView: view });
   },
 
   applySnapshot: (snapshot) => {

@@ -10,6 +10,7 @@ import { parseWsIncomingMessage } from "../types/wsSchemas";
 type SnapshotListener = (state: ServerViewModel) => void;
 type AuthListener = (auth: AuthOkData) => void;
 type CombatLogsListener = (payload: CombatLogsPayload) => void;
+type ErrorListener = (payload: { reason: string }) => void;
 
 export class MirrorSocketClient {
   private readonly ws: WebSocket;
@@ -19,6 +20,7 @@ export class MirrorSocketClient {
     private readonly onSnapshot: SnapshotListener,
     private readonly onAuthOk?: AuthListener,
     private readonly onCombatLogs?: CombatLogsListener,
+    private readonly onError?: ErrorListener,
     private readonly sessionTicket?: string
   ) {
     this.ws = new WebSocket(endpoint);
@@ -60,6 +62,11 @@ export class MirrorSocketClient {
 
     if (payload.type === "COMBAT_LOGS") {
       this.onCombatLogs?.(payload.data);
+      return;
+    }
+
+    if (payload.type === "ERROR") {
+      this.onError?.(payload.data);
     }
   };
 

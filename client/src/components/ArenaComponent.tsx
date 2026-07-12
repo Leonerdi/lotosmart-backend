@@ -29,6 +29,10 @@ type FxParticle = {
 
 const ARENA_COOLDOWN_TICKS = 30;
 
+type ArenaComponentProps = {
+  onExitArena?: () => void;
+};
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -169,7 +173,7 @@ function cooldownFromLastCast(currentTick: number, lastCastTick: number | undefi
   };
 }
 
-export const ArenaComponent = memo(function ArenaComponent() {
+export const ArenaComponent = memo(function ArenaComponent({ onExitArena }: ArenaComponentProps) {
   const profile = useGameStore((state) => state.profile);
   const combatLogs = useGameStore((state) => state.combatLogs);
 
@@ -465,6 +469,15 @@ export const ArenaComponent = memo(function ArenaComponent() {
         </button>
         <button type="button" className="rounded border border-zinc-600 px-1.5 py-0.5 hover:bg-zinc-800" onClick={() => setPlaybackSpeed(4)}>
           4x
+        </button>
+        <button
+          type="button"
+          className="ml-1 rounded border border-amber-800/70 px-1.5 py-0.5 text-amber-200 hover:bg-amber-900/30"
+          onClick={() => {
+            onExitArena?.();
+          }}
+        >
+          Voltar para Sarjeta
         </button>
         <span className="ml-1 text-zinc-400">Velocidade: {playbackSpeed.toFixed(2)}x</span>
       </div>

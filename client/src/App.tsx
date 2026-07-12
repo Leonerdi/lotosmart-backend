@@ -20,12 +20,32 @@ function preventContextMenu() {
   });
 }
 
+function shouldOpenArenaForCombat(source: string | undefined): boolean {
+  const normalized = String(source ?? "").toUpperCase();
+  if (!normalized) {
+    return true;
+  }
+  return normalized !== "IDLE_WAVE";
+}
+
+function shouldStartCombatLoading(intent: MirrorIntent): boolean {
+  return intent.acao === "DESAFIAR_RANQUEADO" || intent.acao === "ENTRAR_FILA_RANKEADA";
+}
+
 export default function App() {
   const { snapshot, setSnapshot, forgeableItems } = useMirrorStore();
   const setCombatPayload = useGameStore((state) => state.setCombatPayload);
   const playCombat = useGameStore((state) => state.play);
+  const resetCombat = useGameStore((state) => state.resetCombat);
+  const isLoadingCombat = useGameStore((state) => state.isLoadingCombat);
+  const startCombatLoading = useGameStore((state) => state.startCombatLoading);
+  const stopCombatLoading = useGameStore((state) => state.stopCombatLoading);
+  const currentView = useGameStore((state) => state.currentView);
+  const changeView = useGameStore((state) => state.changeView);
   const wsRef = useRef<MirrorSocketClient | null>(null);
   const [offlineReward, setOfflineReward] = useState<OfflineReward | null>(null);
+  const [displayView, setDisplayView] = useState(currentView);
+  const [isViewTransitioning, setIsViewTransitioning] = useState(false);
 
   useWindowPersistence();
 
@@ -41,7 +61,15 @@ export default function App() {
       },
       (payload) => {
         setCombatPayload(payload);
-        playCombat();
+        if (shouldOpenArenaForCombat(payload.source)) {
+          stopCombatLoading();
+          changeView("ARENA");
+          playCombat();
+        }
+      },
+      (errorPayload) => {
+        stopCombatLoading();
+        console.error("[ws] erro de transacao", errorPayload.reason);
       },
       SESSION_TICKET
     );
@@ -50,9 +78,32 @@ export default function App() {
       wsRef.current?.dispose();
       wsRef.current = null;
     };
-  }, [playCombat, setCombatPayload, setSnapshot]);
+  }, [changeView, playCombat, setCombatPayload, setSnapshot, stopCombatLoading]);
+
+  useEffect(() => {
+    if (displayView === currentView) {
+      return;
+    }
+
+    setIsViewTransitioning(true);
+    const timeout = window.setTimeout(() => {
+      setDisplayView(currentView);
+      setIsViewTransitioning(false);
+    }, 140);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [currentView, displayView]);
 
   const sendIntent = (intent: MirrorIntent) => {
+    if (shouldStartCombatLoading(intent)) {
+      if (isLoadingCombat) {
+        return;
+      }
+      startCombatLoading();
+    }
+
     wsRef.current?.sendIntent(intent);
   };
 
@@ -84,36 +135,60 @@ export default function App() {
         {snapshot.tema_geografico ?? "Submundo"} | Bracket: {snapshot.matchmaking_bracket ?? "BRONZE"} | Boss: {snapshot.boss_ready ? "Pronto" : "Bloqueado"}
       </section>
 
-      <ArenaComponent />
+      <section
+        className={`mt-1 flex min-h-0 flex-1 flex-col transition-all duration-300 ease-out ${
+          isViewTransitioning ? "scale-[0.985] opacity-0" : "scale-100 opacity-100"
+        }`}
+      >
+        {displayView === "ARENA" ? (
+          <ArenaComponent
+            onExitArena={() => {
+              resetCombat();
+              changeView("TAVERNA");
+            }}
+          />
+        ) : (
+          <>
+            <InventoryPanel tabs={snapshot.inventory_tabs} />
+            <SynthesisPanel items={forgeableItems} dispatchIntent={sendIntent} />
 
-      <InventoryPanel tabs={snapshot.inventory_tabs} />
-      <SynthesisPanel items={forgeableItems} dispatchIntent={sendIntent} />
+            <footer className="mt-auto flex items-center justify-between gap-2 pt-1 text-[9px] text-zinc-400">
+              <button
+                type="button"
+                className="rounded border border-amber-800/60 px-2 py-1 hover:bg-amber-900/40"
+                onClick={() => sendIntent({ acao: "ENTRAR_FILA_CASUAL" })}
+              >
+                PvP Casual
+              </button>
+              <button
+                type="button"
+                className="rounded border border-amber-800/60 px-2 py-1 hover:bg-amber-900/40"
+                onClick={() => sendIntent({ acao: "ENTRAR_FILA_RANKEADA" })}
+                disabled={isLoadingCombat}
+              >
+                {isLoadingCombat ? "Processando..." : "PvP Rankeado"}
+              </button>
+              <button
+                type="button"
+                className="rounded border border-zinc-700 px-2 py-1 hover:bg-zinc-800"
+                onClick={() => {
+                  void startResizeDragging();
+                }}
+              >
+                Redimensionar
+              </button>
+            </footer>
+          </>
+        )}
+      </section>
 
-      <footer className="mt-auto flex items-center justify-between gap-2 pt-1 text-[9px] text-zinc-400">
-        <button
-          type="button"
-          className="rounded border border-amber-800/60 px-2 py-1 hover:bg-amber-900/40"
-          onClick={() => sendIntent({ acao: "ENTRAR_FILA_CASUAL" })}
-        >
-          PvP Casual
-        </button>
-        <button
-          type="button"
-          className="rounded border border-amber-800/60 px-2 py-1 hover:bg-amber-900/40"
-          onClick={() => sendIntent({ acao: "ENTRAR_FILA_RANKEADA" })}
-        >
-          PvP Rankeado
-        </button>
-        <button
-          type="button"
-          className="rounded border border-zinc-700 px-2 py-1 hover:bg-zinc-800"
-          onClick={() => {
-            void startResizeDragging();
-          }}
-        >
-          Redimensionar
-        </button>
-      </footer>
+      {isLoadingCombat ? (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <p className="animate-pulse px-4 text-center text-sm font-semibold tracking-wide text-amber-200">
+            Calculando subornos e combinando apostas...
+          </p>
+        </div>
+      ) : null}
 
       <OfflineRewardModal reward={offlineReward} onClose={() => setOfflineReward(null)} />
     </main>
