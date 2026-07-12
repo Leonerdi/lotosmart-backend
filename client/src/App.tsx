@@ -4,7 +4,7 @@ import { InventoryPanel } from "./components/InventoryPanel";
 import { OfflineRewardModal } from "./components/OfflineRewardModal";
 import { PinButton } from "./components/PinButton";
 import { SynthesisPanel } from "./components/SynthesisPanel";
-import { useCombatPlayback } from "./hooks/useCombatPlayback";
+import { ArenaComponent } from "./components/ArenaComponent";
 import { useWindowPersistence } from "./hooks/useWindowPersistence";
 import { MirrorSocketClient } from "./services/socketClient";
 import { useMirrorStore } from "./store/useMirrorStore";
@@ -23,19 +23,9 @@ function preventContextMenu() {
 export default function App() {
   const { snapshot, setSnapshot, forgeableItems } = useMirrorStore();
   const setCombatPayload = useGameStore((state) => state.setCombatPayload);
+  const playCombat = useGameStore((state) => state.play);
   const wsRef = useRef<MirrorSocketClient | null>(null);
   const [offlineReward, setOfflineReward] = useState<OfflineReward | null>(null);
-  const {
-    visualState,
-    currentTick,
-    totalTicks,
-    playbackSpeed,
-    isPlaying,
-    play,
-    pause,
-    skipToEnd,
-    setPlaybackSpeed
-  } = useCombatPlayback();
 
   useWindowPersistence();
 
@@ -51,7 +41,7 @@ export default function App() {
       },
       (payload) => {
         setCombatPayload(payload);
-        play();
+        playCombat();
       },
       SESSION_TICKET
     );
@@ -60,7 +50,7 @@ export default function App() {
       wsRef.current?.dispose();
       wsRef.current = null;
     };
-  }, [play, setCombatPayload, setSnapshot]);
+  }, [playCombat, setCombatPayload, setSnapshot]);
 
   const sendIntent = (intent: MirrorIntent) => {
     wsRef.current?.sendIntent(intent);
@@ -94,55 +84,7 @@ export default function App() {
         {snapshot.tema_geografico ?? "Submundo"} | Bracket: {snapshot.matchmaking_bracket ?? "BRONZE"} | Boss: {snapshot.boss_ready ? "Pronto" : "Bloqueado"}
       </section>
 
-      <section className="mt-1 rounded-md border border-zinc-700 bg-zinc-900/50 px-2 py-1 text-[9px] text-zinc-300">
-        Animacao: {visualState.is_animating ? "ATIVA" : "IDLE"} | Tick: {Math.min(currentTick + 1, Math.max(totalTicks, 1))}/{Math.max(totalTicks, 1)} | Atacante: {visualState.actor_id ?? "-"} | Alvo: {visualState.target_id ?? "-"} | Dano: {visualState.last_damage}
-      </section>
-
-      <section className="mt-1 flex flex-wrap items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900/50 px-2 py-1 text-[9px] text-zinc-300">
-        <button
-          type="button"
-          className="rounded border border-zinc-600 px-1.5 py-0.5 hover:bg-zinc-800"
-          onClick={() => {
-            if (isPlaying) {
-              pause();
-            } else {
-              play();
-            }
-          }}
-        >
-          {isPlaying ? "Pausar" : "Play"}
-        </button>
-        <button
-          type="button"
-          className="rounded border border-zinc-600 px-1.5 py-0.5 hover:bg-zinc-800"
-          onClick={() => skipToEnd()}
-          disabled={totalTicks === 0}
-        >
-          Skip
-        </button>
-        <button
-          type="button"
-          className="rounded border border-zinc-600 px-1.5 py-0.5 hover:bg-zinc-800"
-          onClick={() => setPlaybackSpeed(1)}
-        >
-          1x
-        </button>
-        <button
-          type="button"
-          className="rounded border border-zinc-600 px-1.5 py-0.5 hover:bg-zinc-800"
-          onClick={() => setPlaybackSpeed(2)}
-        >
-          2x
-        </button>
-        <button
-          type="button"
-          className="rounded border border-zinc-600 px-1.5 py-0.5 hover:bg-zinc-800"
-          onClick={() => setPlaybackSpeed(4)}
-        >
-          4x
-        </button>
-        <span className="ml-1 text-zinc-400">Velocidade: {playbackSpeed.toFixed(2)}x</span>
-      </section>
+      <ArenaComponent />
 
       <InventoryPanel tabs={snapshot.inventory_tabs} />
       <SynthesisPanel items={forgeableItems} dispatchIntent={sendIntent} />
